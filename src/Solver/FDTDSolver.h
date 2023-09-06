@@ -75,9 +75,8 @@ namespace ippl {
         Vector<int, Dim> nr_m;
 
         // size of timestep
-        public:
         double dt;
-        private:
+
         // seed flag
         bool seed;
 
@@ -89,7 +88,6 @@ namespace ippl {
         VField_t* JN_mp;
 
         // scalar and vector potentials at n-1, n, n+1 times
-public: // uh
         Field_t phiNm1_m;
         Field_t phiN_m;
         Field_t phiNp1_m;
