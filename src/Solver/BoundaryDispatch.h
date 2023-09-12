@@ -1,0 +1,75 @@
+#ifndef IPPL_BOUNDARY_DISPATH_H
+#define IPPL_BOUNDARY_DISPATH_H
+#include "Field/Field.h"
+#include <type_traits>
+#include <cstdint>
+enum boundary_occlusion : uint32_t{
+    x_min = 1, y_min = 2 , z_min = 4,
+    x_max = 8, y_max = 16, z_max = 32,
+};
+std::string to_string(boundary_occlusion value) {
+    std::string result;
+    if (value & x_min)
+        result += "x_min ";
+    if (value & y_min)
+        result += "y_min ";
+    if (value & z_min)
+        result += "z_min ";
+    if (value & x_max)
+        result += "x_max ";
+    if (value & y_max)
+        result += "y_max ";
+    if (value & z_max)
+        result += "z_max ";
+    
+    // Remove trailing space if there is one
+    if (!result.empty() && result.back() == ' ')
+        result.pop_back();
+    return result;
+}
+//#include <cstddef>
+template<typename field, typename boundary_callable, typename interior_callable>
+//struct lambda_dispatcher{
+    void lambda_dispatch(field f, const size_t boundary_thickness, boundary_callable boundary_function, interior_callable internal_function){
+        const size_t nghost = f.getNghost();
+        auto ldom = f.getLayout().getLocalNDIndex();
+        auto domain_m = f.getLayout().getDomain();
+        //ippl::Vector<size_t, 3> nr_m;
+        ippl::Vector<size_t, 3> nr_m_minus_boundary_thickness;
+        for (unsigned int i = 0; i < 3; ++i)
+            //nr_m[i] = domain_m[i].length();
+            nr_m_minus_boundary_thickness[i] = domain_m[i].length() - boundary_thickness;
+        
+        Kokkos::parallel_for(
+        "Dispatch with case distinction between boundary and interior", f.getFieldRangePolicy(),
+        KOKKOS_LAMBDA(size_t i, size_t j, size_t k) {
+            const size_t i_noghost = i + ldom[0].first() - nghost;
+            const size_t j_noghost = j + ldom[1].first() - nghost;
+            const size_t k_noghost = k + ldom[2].first() - nghost;
+            if(
+              i_noghost < boundary_thickness || i_noghost >= nr_m_minus_boundary_thickness[0]||
+              j_noghost < boundary_thickness || j_noghost >= nr_m_minus_boundary_thickness[1]||
+              k_noghost < boundary_thickness || k_noghost >= nr_m_minus_boundary_thickness[2]){
+                if constexpr(std::is_invocable_v<boundary_callable, size_t, size_t, size_t>)
+                    boundary_function(i, j, k);
+                if constexpr(std::is_invocable_v<boundary_callable, size_t, size_t, size_t, boundary_occlusion>){
+                    uint32_t code = uint32_t(i_noghost < boundary_thickness)/*<< 0*/|
+                                    uint32_t(j_noghost < boundary_thickness)  << 1  |
+                                    uint32_t(k_noghost < boundary_thickness)  << 2  |
+                                    uint32_t(i_noghost >= nr_m_minus_boundary_thickness[0]) << 3 |
+                                    uint32_t(j_noghost >= nr_m_minus_boundary_thickness[1]) << 4 |
+                                    uint32_t(k_noghost >= nr_m_minus_boundary_thickness[2]) << 5;
+                    boundary_occlusion occl = (boundary_occlusion)code;
+
+
+                    boundary_function(i, j, k, occl);
+                }
+            }
+            else{
+                internal_function(i, j, k);
+            }
+        });
+    }
+//};
+
+#endif

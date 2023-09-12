@@ -49,7 +49,14 @@ public:
 };
 
 //////////////////////////////////////////////////////////////////////
-
+template<typename T1, typename T2, typename R>
+struct binary_function{
+    R operator()(const T1& t1, const T2& t2)const{
+        (void)t1;
+        (void)t2;
+        return R{};
+    }
+};
 template <class Key, class T, class Compare = dummy_less<Key> >
 class vmap {
 public:
@@ -61,7 +68,7 @@ public:
 
     class value_compare : public
 
-                          std::binary_function<value_type, value_type, bool> {
+                          binary_function<value_type, value_type, bool> {
     private:
         Compare comp;
 

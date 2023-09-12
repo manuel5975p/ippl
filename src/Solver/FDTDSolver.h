@@ -54,10 +54,10 @@ namespace ippl {
         void solve();
 
         // evaluates E and B fields using computed potentials
-        void field_evaluation();
+        double field_evaluation();
 
         // gaussian pulse
-        double gaussian(size_t it);
+        double gaussian(size_t it)const noexcept;
 
         // initialization of FDTD solver
         void initialize();

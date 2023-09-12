@@ -55,9 +55,11 @@ namespace ippl {
     template <typename Tfields, unsigned Dim, class M, class C>
     void FDTDSolver<Tfields, Dim, M, C>::solve() {
         // physical constant
-        double c        = 1.0;  // 299792458.0;
-        double mu0      = 1.0;  // 1.25663706212e-6;
-        double epsilon0 = 1.0 / (c * c * mu0);
+        //using scalar;// = typename Tfields::BareField_t::value_type::
+
+        constexpr double c        = 1.0;  // 299792458.0;
+        constexpr double mu0      = 1.0;  // 1.25663706212e-6;
+        constexpr double epsilon0 = 1.0 / (c * c * mu0);
 
         // finite differences constants
         double a1 = 2.0
@@ -72,12 +74,14 @@ namespace ippl {
         double beta0[3] = {(c * dt - hr_m[0]) / (c * dt + hr_m[0]),
                            (c * dt - hr_m[1]) / (c * dt + hr_m[1]),
                            (c * dt - hr_m[2]) / (c * dt + hr_m[2])};
-        double beta1[3] = {2.0 * dt * hr_m[0] / (c * dt + hr_m[0]),
-                           2.0 * dt * hr_m[1] / (c * dt + hr_m[1]),
-                           2.0 * dt * hr_m[2] / (c * dt + hr_m[2])};
+        double beta1[3] = {2.0 * hr_m[0] / (c * dt + hr_m[0]),
+                           2.0 * hr_m[1] / (c * dt + hr_m[1]),
+                           2.0 * hr_m[2] / (c * dt + hr_m[2])};
         double beta2[3] = {-1.0, -1.0, -1.0};
 
         // preliminaries for Kokkos loops (ghost cells and views)
+        phiNp1_m = 0.0;
+        aNp1_m = 0.0;
         auto view_phiN   = phiN_m.getView();
         auto view_phiNm1 = phiNm1_m.getView();
         auto view_phiNp1 = phiNp1_m.getView();
@@ -98,7 +102,6 @@ namespace ippl {
         // then, if the user has set a seed, the seed is added via TF/SF boundaries
         // (TF/SF = total-field/scattered-field technique)
         // finally, absorbing boundary conditions are imposed
-
         Kokkos::parallel_for(
             "Scalar potential update", ippl::getRangePolicy(view_phiN, nghost_phi),
             KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -116,7 +119,7 @@ namespace ippl {
                                   + a6 * (view_phiN(i, j, k + 1) + view_phiN(i, j, k - 1))
                                   + a8 * (-view_rhoN(i, j, k) / epsilon0);
 
-                view_phiNp1(i, j, k) = isInterior * interior;
+                view_phiNp1(i, j, k) = isInterior * interior + !isInterior * view_phiNp1(i, j, k);
             });
 
         for (size_t gd = 0; gd < Dim; ++gd) {
@@ -136,8 +139,11 @@ namespace ippl {
                                       + a4 * (view_aN(i, j + 1, k)[gd] + view_aN(i, j - 1, k)[gd])
                                       + a6 * (view_aN(i, j, k + 1)[gd] + view_aN(i, j, k - 1)[gd])
                                       + a8 * (-view_JN(i, j, k)[gd] * mu0);
-
-                    view_aNp1(i, j, k)[gd] = isInterior * interior;
+                    if(!isInterior && gd == 0 && jg == 1){
+                        //std::printf("%f, %f, %f\n", view_aNp1(i, j, k)[0], view_aNp1(i, j, k)[1], view_aNp1(i, j, k)[2]);
+                        //std::printf("%d, %d, %d\n", i, j, k);
+                    }
+                    view_aNp1(i, j, k)[gd] = isInterior * interior + !isInterior * view_aNp1(i, j, k)[gd];
                 });
         }
 
@@ -198,7 +204,18 @@ namespace ippl {
                         bool isZmax_TF = ((ig > 2) && (jg > 2) && (kg == nr_m[2] - 3)
                                           && (ig < nr_m[0] - 3) && (jg < nr_m[1] - 3));
                         double zmax_TF = a6 * gaussian(iteration);
-
+                        isXmax_SF = false;
+                        isXmax_TF = false;
+                        isXmin_SF = false;
+                        isYmin_TF = false;
+                        //isYmax_SF = false;
+                        //isYmax_TF = false;
+                        isYmin_SF = false;
+                        isXmin_TF = false;
+                        isZmax_SF = false;
+                        isZmax_TF = false;
+                        isZmin_SF = false;
+                        isZmin_TF = false;
                         // update field (add seed)
                         view_aNp1(i, j, k)[gd] +=
                             isXmin_SF * xmin_SF + isYmin_SF * ymin_SF + isZmin_SF * zmin_SF
@@ -251,9 +268,10 @@ namespace ippl {
                 double zmax = beta0[2] * (view_phiNm1(i, j, k) + view_phiNp1(i, j, k - 1))
                               + beta1[2] * (view_phiN(i, j, k) + view_phiN(i, j, k - 1))
                               + beta2[2] * (view_phiNm1(i, j, k - 1));
-
-                view_phiNp1(i, j, k) += isXmin * xmin + isYmin * ymin + isZmin * zmin
-                                        + isXmax * xmax + isYmax * ymax + isZmax * zmax;
+                bool isInterior = !(isXmin | isXmax | isYmin | isYmax | isZmin | isZmax);
+                view_phiNp1(i, j, k) = isXmin * xmin + isYmin * ymin + isZmin * zmin
+                                        + isXmax * xmax + isYmax * ymax + isZmax * zmax + isInterior * view_phiNp1(i, j, k);
+                                    
             });
 
         for (size_t gd = 0; gd < Dim; ++gd) {
@@ -297,14 +315,16 @@ namespace ippl {
                                   + beta1[2] * (view_aN(i, j, k)[gd] + view_aN(i, j, k - 1)[gd])
                                   + beta2[2] * (view_aNm1(i, j, k - 1)[gd]);
 
-                    view_aNp1(i, j, k)[gd] += isXmin * xmin + isYmin * ymin + isZmin * zmin
-                                              + isXmax * xmax + isYmax * ymax + isZmax * zmax;
+                    
+                    bool isInterior = !(isXmin | isXmax | isYmin | isYmax | isZmin | isZmax);
+                    view_aNp1(i, j, k)[gd] = isXmin * xmin + isYmin * ymin + isZmin * zmin
+                                              + isXmax * xmax + isYmax * ymax + isZmax * zmax + isInterior * view_aNp1(i, j, k)[gd];
                 });
         }
         Kokkos::fence();
 
         // evaluate E and B fields at N
-        field_evaluation();
+        std::cout << "Energy: " << field_evaluation() << "\n";
 
         // store potentials at N in Nm1, and Np1 in N
         Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
@@ -314,7 +334,7 @@ namespace ippl {
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
-    void FDTDSolver<Tfields, Dim, M, C>::field_evaluation() {
+    double FDTDSolver<Tfields, Dim, M, C>::field_evaluation(){
         // magnetic field is the curl of the vector potential
         // we take the average of the potential at N and N+1
         (*Bn_mp) = 0.5 * (curl(aN_m) + curl(aNp1_m));
@@ -322,11 +342,36 @@ namespace ippl {
         // electric field is the time derivative of the vector potential
         // minus the gradient of the scalar potential
         (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
+
+        auto Bview = Bn_mp->getView();
+        auto Eview = En_mp->getView();
+
+        double energy = 0.0;
+        for(size_t i = 0;i < Bview.extent(0);i++){
+            for(size_t j = 0;j < Bview.extent(1);j++){
+                for(size_t k = 0;k < Bview.extent(2);k++){
+                    energy += Bview(i, j, k)[0] * Bview(i, j, k)[0]+
+                              Bview(i, j, k)[1] * Bview(i, j, k)[1]+
+                              Bview(i, j, k)[2] * Bview(i, j, k)[2]; 
+                }
+            }
+        }
+        for(size_t i = 0;i < Eview.extent(0);i++){
+            for(size_t j = 0;j < Eview.extent(1);j++){
+                for(size_t k = 0;k < Eview.extent(2);k++){
+                    energy += Eview(i, j, k)[0] * Eview(i, j, k)[0]+
+                              Eview(i, j, k)[1] * Eview(i, j, k)[1]+
+                              Eview(i, j, k)[2] * Eview(i, j, k)[2]; 
+                }
+            }
+        }
+        return energy;
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
-    double FDTDSolver<Tfields, Dim, M, C>::gaussian(size_t it) {
-        double arg = Kokkos::pow((it * dt) / 0.1, 2);
+    double FDTDSolver<Tfields, Dim, M, C>::gaussian(size_t it) const noexcept{
+        //return 1.0;
+        double arg = Kokkos::pow((1.0 - it * dt) / 0.25, 2);
         return 100 * Kokkos::exp(-arg);
     };
 

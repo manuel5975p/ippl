@@ -36,6 +36,7 @@
 #include "Utility/IpplTimings.h"
 
 #include "Solver/FDTDSolver.h"
+#include "Solver/BoundaryDispatch.h"
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
@@ -164,7 +165,7 @@ int main(int argc, char* argv[]) {
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
         const double c = 1.0;  // 299792458.0;
-        double dt      = std::min({dx, dy, dz}) * 0.5 / c;
+        double dt      = std::min({dx, dy, dz}) * 0.1 / c;
 
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
@@ -172,7 +173,13 @@ int main(int argc, char* argv[]) {
         // define the R (rho) field
         Field_t rho;
         rho.initialize(mesh, layout);
-
+        //lambda_dispatch(rho, 1, 
+        //KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ){
+        //    //std::printf("%ld, %ld, %ld, %s\n", i, j, k, to_string(occ).c_str());
+        //},
+        //KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+        //    
+        //});
         // define the Vector field E (LHS)
         VField_t fieldE, fieldB;
         fieldE.initialize(mesh, layout);
@@ -186,7 +193,7 @@ int main(int argc, char* argv[]) {
         current = 0.0;
 
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
-        bool seed = false;
+        bool seed = true;
 
         // define an FDTDSolver object
         ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, dt, seed);
