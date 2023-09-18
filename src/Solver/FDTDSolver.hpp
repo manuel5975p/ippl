@@ -21,10 +21,94 @@
 #include "Field/Field.h"
 
 #include "FDTDSolver.h"
+#include <array>
 #include "Field/HaloCells.h"
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
+template<typename T>
+T squaredNorm(const ippl::Vector<T, 3>& a){
+    return a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+}
+template<typename T>
+auto sq(T x){
+    return x * x;
+}
+template<typename... Args>
+void castToVoid(Args&&... args) {
+    (void)(std::tuple<Args...>{args...});
+}
+#define CAST_TO_VOID(...) castToVoid(__VA_ARGS__)
+template<typename T, unsigned Dim>
+T dot_prod(const ippl::Vector<T, Dim>& a, const ippl::Vector<T, Dim>& b){
+    T ret = 0.0;
+    for(unsigned i = 0;i < Dim;i++){
+        ret += a[i] * b[i];
+    }
+    return ret;
+}
 
+enum axis_aligned_occlusion : unsigned int{
+    NONE = 0u, AT_MIN = 1u, AT_MAX = 2u, 
+};
+template<typename T>
+struct axis_aligned_occlusion_maker{
+    using type = axis_aligned_occlusion;
+};
+template<typename T>
+using axis_aligned_occlusion_maker_t = typename axis_aligned_occlusion_maker<T>::type;
+
+axis_aligned_occlusion operator|=(axis_aligned_occlusion& a, axis_aligned_occlusion b){
+    a = (axis_aligned_occlusion)(static_cast<unsigned int>(a) | static_cast<unsigned int>(b));
+    return a;
+}
+axis_aligned_occlusion& operator|=(axis_aligned_occlusion& a, unsigned int b){
+    a = (axis_aligned_occlusion)(static_cast<unsigned int>(a) | b);
+    return a;
+}
+axis_aligned_occlusion& operator&=(axis_aligned_occlusion& a, axis_aligned_occlusion b){
+    a = (axis_aligned_occlusion)(static_cast<unsigned int>(a) & static_cast<unsigned int>(b));
+    return a;
+}
+axis_aligned_occlusion& operator&=(axis_aligned_occlusion& a, unsigned int b){
+    a = (axis_aligned_occlusion)(static_cast<unsigned int>(a) & b);
+    return a;
+}
+template<typename... extent_types>
+std::array<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(size_t boundary_distance, const std::tuple<extent_types...>& _index, const std::tuple<extent_types...>& _extents){
+    constexpr size_t Dim = std::tuple_size_v<std::tuple<extent_types...>>;
+    
+    constexpr auto get_array = [](auto&& ... x){ return std::array<size_t, sizeof...(x)>{static_cast<size_t>(x)... }; };
+    
+    std::array<size_t, Dim> index = std::apply(get_array, _index);
+    std::array<size_t, Dim> extents = std::apply(get_array, _extents);
+    std::array<axis_aligned_occlusion, Dim> ret_array;
+
+    size_t minimal_distance_to_zero = index[0];
+    size_t minimal_distance_to_extent_minus_one = extents[0] - index[0] - 1;
+    ret_array[0] = (axis_aligned_occlusion)(index[0] == boundary_distance);
+    ret_array[0] |= (axis_aligned_occlusion)(index[0] == (extents[0] - 1 - boundary_distance)) << 1;
+    for(size_t i = 1;i < Dim;i++){
+        minimal_distance_to_zero = std::min(minimal_distance_to_zero, index[i]);
+        minimal_distance_to_extent_minus_one = std::min(minimal_distance_to_extent_minus_one, extents[i] - index[i] - 1);
+        ret_array[i] = (axis_aligned_occlusion)(index[i] == boundary_distance);
+        ret_array[i] |= (axis_aligned_occlusion)(index[i] == (extents[i] - 1 - boundary_distance)) << 1;
+    }
+    bool behindboundary = minimal_distance_to_zero < boundary_distance || minimal_distance_to_extent_minus_one < boundary_distance;
+    if(behindboundary){
+        for(size_t i = 0;i < Dim;i++){
+            ret_array[i] = (axis_aligned_occlusion)0;
+        }
+    }
+    return ret_array;
+}
+//template<typename T>
+//ippl::Vector<T, 3> cross(const ippl::Vector<T, 3>& a, const ippl::Vector<T, 3>& b){
+//    ippl::Vector<T, 3> ret;
+//    ret[0] = a[1]* b[2] - a[2] * b[1];
+//    ret[2] = a[0] * b[1] - a[1] * b[0];
+//    ret[1] = a[2] * b[0] - a[0] * b[2];
+//    return ret;
+//}
 namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
@@ -141,7 +225,7 @@ namespace ippl {
                                       + a8 * (-view_JN(i, j, k)[gd] * mu0);
                     if(!isInterior && gd == 0 && jg == 1){
                         //std::printf("%f, %f, %f\n", view_aNp1(i, j, k)[0], view_aNp1(i, j, k)[1], view_aNp1(i, j, k)[2]);
-                        //std::printf("%d, %d, %d\n", i, j, k);
+                        //std::printf("%d, %d, %d\n", ig, jg, kg);
                     }
                     view_aNp1(i, j, k)[gd] = isInterior * interior + !isInterior * view_aNp1(i, j, k)[gd];
                 });
@@ -156,7 +240,7 @@ namespace ippl {
 
             // the scattered field boundary is the 2nd point after the boundary
             // the total field boundary is the 3rd point after the boundary
-            for (size_t gd = 0; gd < Dim; ++gd) {
+            for (size_t gd = 0; gd < 1; ++gd) {
                 Kokkos::parallel_for(
                     "Vector potential update", ippl::getRangePolicy(view_aN, nghost_a),
                     KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -168,54 +252,54 @@ namespace ippl {
                         // SF boundary in all 3 dimensions
                         bool isXmin_SF = ((ig == 1) && (jg > 1) && (kg > 1) && (jg < nr_m[1] - 2)
                                           && (kg < nr_m[2] - 2));
-                        double xmin_SF = a2 * gaussian(iteration);
+                        double xmin_SF = a2 * gaussian(iteration, i, j, k);
                         bool isYmin_SF = ((ig > 1) && (jg == 1) && (kg > 1) && (ig < nr_m[0] - 2)
                                           && (kg < nr_m[2] - 2));
-                        double ymin_SF = a4 * gaussian(iteration);
+                        double ymin_SF = a4 * gaussian(iteration, i, j, k);
                         bool isZmin_SF = ((ig > 1) && (jg > 1) && (kg == 1) && (ig < nr_m[0] - 2)
                                           && (jg < nr_m[1] - 2));
-                        double zmin_SF = a6 * gaussian(iteration);
+                        double zmin_SF = a6 * gaussian(iteration, i, j, k);
                         bool isXmax_SF = ((ig == nr_m[0] - 2) && (jg > 1) && (kg > 1)
                                           && (jg < nr_m[1] - 2) && (kg < nr_m[2] - 2));
-                        double xmax_SF = -a2 * gaussian(iteration);
+                        double xmax_SF = -a2 * gaussian(iteration, i, j, k);
                         bool isYmax_SF = ((ig > 1) && (jg == nr_m[1] - 2) && (kg > 1)
                                           && (ig < nr_m[0] - 2) && (kg < nr_m[2] - 2));
-                        double ymax_SF = -a4 * gaussian(iteration);
+                        double ymax_SF = -a4 * gaussian(iteration, i, j, k);
                         bool isZmax_SF = ((ig > 1) && (jg > 1) && (kg == nr_m[2] - 2)
                                           && (ig < nr_m[0] - 2) && (jg < nr_m[1] - 2));
-                        double zmax_SF = -a6 * gaussian(iteration);
+                        double zmax_SF = -a6 * gaussian(iteration, i, j, k);
 
                         // TF boundary
                         bool isXmin_TF = ((ig == 2) && (jg > 2) && (kg > 2) && (jg < nr_m[1] - 3)
                                           && (kg < nr_m[2] - 3));
-                        double xmin_TF = -a2 * gaussian(iteration);
+                        double xmin_TF = -a2 * gaussian(iteration, i, j, k);
                         bool isYmin_TF = ((ig > 2) && (jg == 2) && (kg > 2) && (ig < nr_m[0] - 3)
                                           && (kg < nr_m[2] - 3));
-                        double ymin_TF = -a4 * gaussian(iteration);
+                        double ymin_TF = -a4 * gaussian(iteration, i, j, k);
                         bool isZmin_TF = ((ig > 2) && (jg > 2) && (kg == 2) && (ig < nr_m[0] - 3)
                                           && (jg < nr_m[1] - 3));
-                        double zmin_TF = -a6 * gaussian(iteration);
+                        double zmin_TF = -a6 * gaussian(iteration, i, j, k);
                         bool isXmax_TF = ((ig == nr_m[0] - 3) && (jg > 2) && (kg > 2)
                                           && (jg < nr_m[1] - 3) && (kg < nr_m[2] - 3));
-                        double xmax_TF = a2 * gaussian(iteration);
+                        double xmax_TF = a2 * gaussian(iteration, i, j, k);
                         bool isYmax_TF = ((ig > 2) && (jg == nr_m[1] - 3) && (kg > 2)
                                           && (ig < nr_m[0] - 3) && (kg < nr_m[2] - 3));
-                        double ymax_TF = a4 * gaussian(iteration);
+                        double ymax_TF = a4 * gaussian(iteration, i, j, k);
                         bool isZmax_TF = ((ig > 2) && (jg > 2) && (kg == nr_m[2] - 3)
                                           && (ig < nr_m[0] - 3) && (jg < nr_m[1] - 3));
-                        double zmax_TF = a6 * gaussian(iteration);
-                        isXmax_SF = false;
-                        isXmax_TF = false;
-                        isXmin_SF = false;
-                        isYmin_TF = false;
+                        double zmax_TF = a6 * gaussian(iteration, i, j, k);
+                        //isXmax_SF = false;
+                        //isXmax_TF = false;
+                        //isXmin_SF = false;
+                        //isYmin_TF = false;
                         //isYmax_SF = false;
                         //isYmax_TF = false;
-                        isYmin_SF = false;
-                        isXmin_TF = false;
-                        isZmax_SF = false;
-                        isZmax_TF = false;
-                        isZmin_SF = false;
-                        isZmin_TF = false;
+                        //isYmin_SF = false;
+                        //isXmin_TF = false;
+                        //isZmax_SF = false;
+                        //isZmax_TF = false;
+                        //isZmin_SF = false;
+                        //isZmin_TF = false;
                         // update field (add seed)
                         view_aNp1(i, j, k)[gd] +=
                             isXmin_SF * xmin_SF + isYmin_SF * ymin_SF + isZmin_SF * zmin_SF
@@ -324,7 +408,7 @@ namespace ippl {
         Kokkos::fence();
 
         // evaluate E and B fields at N
-        std::cout << "Energy: " << field_evaluation() << "\n";
+        std::cout << "Energy: " << field_evaluation() << " " << this->absorbed__energy << "\n";
 
         // store potentials at N in Nm1, and Np1 in N
         Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
@@ -337,42 +421,175 @@ namespace ippl {
     double FDTDSolver<Tfields, Dim, M, C>::field_evaluation(){
         // magnetic field is the curl of the vector potential
         // we take the average of the potential at N and N+1
+        auto Aview = this->aN_m.getView();
+        auto Ap1view = this->aNp1_m.getView();
+        if(false)
+        lambda_dispatch(*Bn_mp, 1, KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ){
+            if(__builtin_popcount((unsigned int)occ) == 1){
+                switch(occ){
+                    case x_min:
+                    Aview(i, j, k) = Aview(i + 1, j, k) * 2.0 - Aview(i + 2, j, k);
+                    Ap1view(i, j, k) = Ap1view(i + 1, j, k) * 2.0 - Ap1view(i + 2, j, k);
+                    break;
+                    case x_max:
+                    Aview(i, j, k) = Aview(i - 1, j, k) * 2.0 - Aview(i - 2, j, k);
+                    Ap1view(i, j, k) = Ap1view(i - 1, j, k) * 2.0 - Ap1view(i - 2, j, k);
+                    break;
+                    case y_min:
+                    Aview(i, j, k) = Aview(i, j+1, k) * 2.0 - Aview(i, j+2, k);
+                    Ap1view(i, j, k) = Ap1view(i, j+1, k) * 2.0 - Ap1view(i, j+2, k);
+                    break;
+                    case y_max:
+                    Aview(i, j, k)   = Aview  (i, j-1, k) * 2.0 - Aview  (i, j-2, k);
+                    Ap1view(i, j, k) = Ap1view(i, j-1, k) * 2.0 - Ap1view(i, j-2, k);
+                    break;
+                    case z_min:
+                    Aview(i, j, k)   = Aview  (i, j, k+1) * 2.0 - Aview  (i, j, k+2);
+                    Ap1view(i, j, k) = Ap1view(i, j, k+1) * 2.0 - Ap1view(i, j, k+2);
+                    break;
+                    case z_max:
+                    Aview(i, j, k)   = Aview  (i, j, k-1) * 2.0 - Aview  (i, j, k-2);
+                    Ap1view(i, j, k) = Ap1view(i, j, k-1) * 2.0 - Ap1view(i, j, k-2);
+                    break;
+                }
+            }
+        },
+        KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+            CAST_TO_VOID(i, j, k);
+        });
+        
         (*Bn_mp) = 0.5 * (curl(aN_m) + curl(aNp1_m));
 
         // electric field is the time derivative of the vector potential
         // minus the gradient of the scalar potential
         (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
-
+        //return 0.0;
         auto Bview = Bn_mp->getView();
         auto Eview = En_mp->getView();
+        
+        
+        //std::cout << hr_m << " spac\n";
+        /*double maxE = 0;
+        double maxB = 0;
+        size_t discard = 2;
+        for(size_t i = discard;i < Bview.extent(0) - discard;i++){
+            for(size_t j = discard;j < Bview.extent(1) - discard;j++){
+                for(size_t k = discard;k < Bview.extent(2) - discard;k++){
+                    maxB = std::max({maxB, std::abs(Bview(i, j, k)[0])
+                                         , std::abs(Bview(i, j, k)[1])
+                                         , std::abs(Bview(i, j, k)[2])});
+                }
+            }
+        }
+        for(size_t i = discard;i < Eview.extent(0) - discard;i++){
+            for(size_t j = discard;j < Eview.extent(1) - discard;j++){
+                for(size_t k = discard;k < Eview.extent(2) - discard;k++){
+                    maxE = std::max({maxE, std::abs(Eview(i, j, k)[0])
+                                         , std::abs(Eview(i, j, k)[1])
+                                         , std::abs(Eview(i, j, k)[2])}); 
+                }
+            }
+        }*/
+        //std::printf("maxB, maxE: %f, %f\n", maxB, maxE);
+        
+        Kokkos::View<double***> energy_density("Energies", Eview.extent(0), Eview.extent(1), Eview.extent(2));
+        Kokkos::View<ippl::Vector<double, 3>***> radiation_density("Radiations", Eview.extent(0), Eview.extent(1), Eview.extent(2));
+        Kokkos::parallel_for(ippl::getRangePolicy(energy_density), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+                ippl::Vector<double, 3> E = Eview(i, j, k);
+                ippl::Vector<double, 3> B = Bview(i, j, k);
+                //std::cout << "j = " << j << "\n";
+                ippl::Vector<double, 3> poynting = ippl::cross(E, B);
+                energy_density(i, j, k) = (dot_prod(B, B) + dot_prod(E, E));
+                radiation_density(i, j, k) = poynting;
+        });
+        Kokkos::fence();
+        
+        /*lambda_dispatch(*Bn_mp, 1, KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ){
+            //std::cout << "Reached\n";
+            if(occ == boundary_occlusion::y_min){
+                ippl::Vector<double, 3> E = Eview(i, j, k);
+                ippl::Vector<double, 3> B = Bview(i, j, k);
+                //std::cout << "j = " << j << "\n";
+                ippl::Vector<double, 3> poynting = cross(E, B);
+                energies(i, j, k) = (squaredNorm(B) + squaredNorm(E)) * hr_m[0] * hr_m[1] * hr_m[2];
+                std::cout << "poynting " << poynting[1] << "\n";
+                *pointer_to_absorbed_energy_xD += (squaredNorm(B) + squaredNorm(E)) * hr_m[0] * hr_m[2] * dt; //Because the surface normal is negative -y unit vector
+            }
+        },
+        KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+            (void)i;(void)j;(void)k;
+        }, 2);*/
 
-        double energy = 0.0;
-        for(size_t i = 0;i < Bview.extent(0);i++){
-            for(size_t j = 0;j < Bview.extent(1);j++){
-                for(size_t k = 0;k < Bview.extent(2);k++){
-                    energy += Bview(i, j, k)[0] * Bview(i, j, k)[0]+
-                              Bview(i, j, k)[1] * Bview(i, j, k)[1]+
-                              Bview(i, j, k)[2] * Bview(i, j, k)[2]; 
-                }
+        double totalenergy = 0.0;
+        double absorb      = 0.0;
+
+        Kokkos::parallel_reduce(ippl::getRangePolicy(energy_density, 3), KOKKOS_LAMBDA(size_t i, size_t j, size_t k, double& ref){
+            ref += energy_density(i, j, k);
+        }, totalenergy);
+
+        Kokkos::parallel_reduce(ippl::getRangePolicy(energy_density, 2), KOKKOS_LAMBDA(size_t i, size_t j, size_t k, double& ref){
+            std::array<axis_aligned_occlusion, 3> ijk_occlusion_for_cells_before_abc = 
+            boundary_occlusion_of(
+                3, std::make_tuple(i, j, k), 
+                std::make_tuple(radiation_density.extent(0), radiation_density.extent(1), radiation_density.extent(2))
+            );
+            /*if((i == 5 || j == 5 || k == 5)){
+                printf("%d %d %d\n", ijk_occlusion_for_cells_before_abc[0], ijk_occlusion_for_cells_before_abc[1], ijk_occlusion_for_cells_before_abc[2]);
             }
-        }
-        for(size_t i = 0;i < Eview.extent(0);i++){
-            for(size_t j = 0;j < Eview.extent(1);j++){
-                for(size_t k = 0;k < Eview.extent(2);k++){
-                    energy += Eview(i, j, k)[0] * Eview(i, j, k)[0]+
-                              Eview(i, j, k)[1] * Eview(i, j, k)[1]+
-                              Eview(i, j, k)[2] * Eview(i, j, k)[2]; 
+            else{
+                
+            }*/
+            const double volume = hr_m[0] * hr_m[1] * hr_m[2];
+            ippl::Vector<double, 3> normal(0.0);
+            for(size_t d = 0;d < 3;d++){
+                
+                //bool skip = false;
+                if(ijk_occlusion_for_cells_before_abc[d] & AT_MAX){
+                    normal[d] = 1.0;
                 }
+                if(ijk_occlusion_for_cells_before_abc[d] & AT_MIN){
+                    normal[d] = -1.0;
+                }
+                if(ijk_occlusion_for_cells_before_abc[d] == 0){
+                    normal[d] = 0.0;
+                }
+                ref += dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d];
+                //char buffer[2048] = {0};
+                //char* bp = buffer;
+                //if(d == 1 && normal[d] == -1.0 && i == nr_m[0] / 2 && k == nr_m[2] / 2 /*&& dot_prod(Eview(i, j, k), Bview(i, j, k)) != 0.0*/){
+                //    bp += sprintf(bp, "E: %f, %f, %f\n", Eview(i, j, k)[0], Eview(i, j, k)[1], Eview(i, j, k)[2]);
+                //    bp += sprintf(bp, "B: %f, %f, %f\n", Bview(i, j, k)[0], Bview(i, j, k)[1], Bview(i, j, k)[2]);
+                //    bp += sprintf(bp, "Dot product: %f\n", dot_prod(Eview(i, j, k), Bview(i, j, k)));
+                //    ippl::Vector<double, 3> cross_prod = ippl::cross(Eview(i, j, k), Bview(i, j, k));
+                //    bp += sprintf(bp, "Cross: %f, %f, %f\n\n", cross_prod[0], cross_prod[1], cross_prod[2]);
+                //    puts(buffer);
+                //}
+                //else{
+                //    skip = true;
+                //}
             }
-        }
-        return energy;
+            
+        }, absorb);
+        Kokkos::fence();
+        this->total_energy = totalenergy * hr_m[0] * hr_m[1] * hr_m[2];
+        this->absorbed__energy -= absorb * dt;
+        return totalenergy * hr_m[0] * hr_m[1] * hr_m[2];
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
-    double FDTDSolver<Tfields, Dim, M, C>::gaussian(size_t it) const noexcept{
+    double FDTDSolver<Tfields, Dim, M, C>::gaussian(size_t it, size_t i, size_t j, size_t k) const noexcept{
         //return 1.0;
-        double arg = Kokkos::pow((1.0 - it * dt) / 0.25, 2);
-        return 100 * Kokkos::exp(-arg);
+        const double y = 1.0 - j * hr_m[1]; // From the max boundary; fix this sometime
+        const double t = it * dt;
+        double plane_wave_excitation_x = (y - t < 0) ? -(y - t) : 0;
+        (void)i;
+        (void)j;
+        (void)k;
+        return 100 * Kokkos::exp(-sq((2.0 - plane_wave_excitation_x) * 4.0));
+
+
+        //double arg = Kokkos::pow((1.0 - it * dt) / 0.25, 2);
+        //return 100 * Kokkos::exp(-arg);
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>

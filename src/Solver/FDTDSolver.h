@@ -21,6 +21,7 @@
 
 #include "Types/Vector.h"
 
+#include "Solver/BoundaryDispatch.h"
 #include "Field/Field.h"
 
 #include "FieldLayout/FieldLayout.h"
@@ -57,12 +58,12 @@ namespace ippl {
         double field_evaluation();
 
         // gaussian pulse
-        double gaussian(size_t it)const noexcept;
+        double gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
 
         // initialization of FDTD solver
         void initialize();
 
-    private:
+    public:
         // mesh and layout objects
         M* mesh_mp;
         FieldLayout_t* layout_mp;
@@ -98,7 +99,8 @@ namespace ippl {
         // E and B fields
         VField_t* En_mp;
         VField_t* Bn_mp;
-
+        double total_energy;
+        double absorbed__energy;
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;
     };
