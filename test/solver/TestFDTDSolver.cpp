@@ -31,15 +31,19 @@
 #include "Ippl.h"
 
 #include <cstdlib>
+#include <fstream>
+#include <functional>
 
 #include "Utility/IpplException.h"
 #include "Utility/IpplTimings.h"
 
 #include "Solver/FDTDSolver.h"
-#include "Solver/BoundaryDispatch.h"
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
+}
+KOKKOS_INLINE_FUNCTION double gauss(double x, double mean, double stddev) {
+    return 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev));
 }
 
 void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
@@ -51,13 +55,14 @@ void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<doub
     typename VField_t::view_type::host_mirror_type host_view = E.getHostMirror();
 
     std::stringstream fname;
+    constexpr char endl = '\n';
     fname << "data/ef_";
     fname << std::setw(4) << std::setfill('0') << iteration;
     fname << ".vtk";
 
     Kokkos::deep_copy(host_view, E.getView());
 
-    Inform vtkout(NULL, fname.str().c_str(), Inform::OVERWRITE);
+    std::ofstream vtkout(fname.str());
     vtkout.precision(10);
     vtkout.setf(std::ios::scientific, std::ios::floatfield);
 
@@ -97,7 +102,8 @@ void dumpVTK(ippl::Field<double, 3, ippl::UniformCartesian<double, 3>,
 
     Kokkos::deep_copy(host_view, rho.getView());
 
-    Inform vtkout(NULL, fname.str().c_str(), Inform::OVERWRITE);
+    std::ofstream vtkout(fname.str());
+    constexpr char endl = '\n';
     vtkout.precision(10);
     vtkout.setf(std::ios::scientific, std::ios::floatfield);
 
@@ -134,8 +140,11 @@ int main(int argc, char* argv[]) {
         ippl::Vector<int, Dim> nr = {std::atoi(argv[1]), std::atoi(argv[2]), std::atoi(argv[3])};
 
         // get the total simulation time from the user
-        const unsigned int iterations = std::atof(argv[4]);
-
+        const double time_simulated = std::atof(argv[4]);
+        if(time_simulated <= 0){
+            std::cerr << "Time must be > 0\n";
+            goto exit;
+        }
         using Mesh_t      = ippl::UniformCartesian<double, Dim>;
         using Centering_t = Mesh_t::DefaultCentering;
         typedef ippl::Field<double, Dim, Mesh_t, Centering_t> Field_t;
@@ -160,13 +169,13 @@ int main(int argc, char* argv[]) {
         ippl::Vector<double, Dim> hr     = {dx, dy, dz};
         ippl::Vector<double, Dim> origin = {0.0, 0.0, 0.0};
         Mesh_t mesh(owned, hr, origin);
-
         // CFL condition lambda = c*dt/h < 1/sqrt(d) = 0.57 for d = 3
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
         const double c = 1.0;  // 299792458.0;
-        double dt      = std::min({dx, dy, dz}) * 0.1 / c;
-
+        double dt      = std::min({dx, dy, dz}) * 0.5 / c;
+        unsigned int iterations = std::ceil(time_simulated / dt);
+        dt = time_simulated / (double)iterations;
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
 
@@ -190,22 +199,34 @@ int main(int argc, char* argv[]) {
         // define current = 0
         VField_t current;
         current.initialize(mesh, layout);
+        
         current = 0.0;
 
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
-        bool seed = true;
+        bool seed = false;
 
         // define an FDTDSolver object
         ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, dt, seed);
+
+        /*
+        std::cout << nr[0] << " " << current.getView().extent(0) << "\n";
+        std::cout << nr[1] << " " << current.getView().extent(1) << "\n";
+        std::cout << nr[2] << " " << current.getView().extent(2) << "\n";
+        std::cout << nr[0] << " " << solver.aN_m.getView().extent(0) << "\n";
+        std::cout << nr[1] << " " << solver.aN_m.getView().extent(1) << "\n";
+        std::cout << nr[2] << " " << solver.aN_m.getView().extent(2) << "\n";
+        return 0;
+        */
 
         if (!seed) {
             // add pulse at center of domain
             auto view_rho    = rho.getView();
             const int nghost = rho.getNghost();
             auto ldom        = layout.getLocalNDIndex();
-
+            auto view_a      = solver.aN_m.getView();
+            auto view_an1    = solver.aNm1_m.getView();
             Kokkos::parallel_for(
-                "Assign sinusoidal source at center", rho.getFieldRangePolicy(),
+                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a)/*rho.getFieldRangePolicy()*/,
                 KOKKOS_LAMBDA(const int i, const int j, const int k) {
                     const int ig = i + ldom[0].first() - nghost;
                     const int jg = j + ldom[1].first() - nghost;
@@ -215,15 +236,23 @@ int main(int argc, char* argv[]) {
                     double x = (ig + 0.5) * hr[0] + origin[0];
                     double y = (jg + 0.5) * hr[1] + origin[1];
                     double z = (kg + 0.5) * hr[2] + origin[2];
-
-                    if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                        view_rho(i, j, k) = sine(0, dt);
+                    //std::cout << std::to_string(y) + " " + std::to_string(gauss(y, 0.5, 0.25)) + "\n";
+                    //if(i > 0 && j > 0 && k > 0 && i < view_a.extent(0) - 1 && j < view_a.extent(1) - 1 && k < view_a.extent(2) - 1){
+                        view_a  (i, j, k)[2] = gauss(y, 0.5, 0.1);
+                        view_an1(i, j, k)[2] = gauss(y, 0.5, 0.1);
+                    //}
+                    
+                    //if ((x == 0.5) && (y == 0.5) && (z == 0.5)){}
+                    //if(jg == nr[1] - 2){
+                        //view_rho(i, j, k) = sine(0, dt);
+                    //}
             });
         }
 
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
+        dumpVTK(fieldB, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
         solver.solve();
-
+        dumpVTK(fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         for (unsigned int it = 1; it < iterations; ++it) {
             msg << "Timestep number = " << it << " , time = " << it * dt << endl;
@@ -231,6 +260,7 @@ int main(int argc, char* argv[]) {
             if (!seed) {
                 // add pulse at center of domain
                 auto view_rho    = rho.getView();
+                auto view_a    = solver.aN_m.getView();
                 const int nghost = rho.getNghost();
                 auto ldom        = layout.getLocalNDIndex();
 
@@ -245,17 +275,56 @@ int main(int argc, char* argv[]) {
                         double x = (ig + 0.5) * hr[0] + origin[0];
                         double y = (jg + 0.5) * hr[1] + origin[1];
                         double z = (kg + 0.5) * hr[2] + origin[2];
-
-                        if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                            view_rho(i, j, k) = sine(it, dt);
+                        //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
+                        //    view_a(i, j, k)[2] += (sine(it, dt) * dt);
+                        //if(jg == nr[1] - 2){
+                        //    //puts("sed");
+                        //    view_a(i, j, k) += ippl::Vector<double, 3>(sine(it, dt) * dt);
+                        //}
+                        //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
+                        //    view_rho(i, j, k) = sine(it, dt);
                 });
             }
 
             solver.solve();
 
-            dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+            dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+        }
+        if (!seed) {
+            // add pulse at center of domain
+            auto view_rho    = rho.getView();
+            const int nghost = rho.getNghost();
+            auto ldom        = layout.getLocalNDIndex();
+            auto view_a      = solver.aN_m.getView();
+            auto view_an1    = solver.aNm1_m.getView();
+            double error_accumulation = 0.0;
+            const double volume = hr[0] * hr[1] * hr[2];
+            Kokkos::parallel_reduce(
+                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a)/*rho.getFieldRangePolicy()*/,
+                KOKKOS_LAMBDA(const int i, const int j, const int k, double& ref) {
+                    const int ig = i + ldom[0].first() - nghost;
+                    const int jg = j + ldom[1].first() - nghost;
+                    const int kg = k + ldom[2].first() - nghost;
+
+                    // define the physical points (cell-centered)
+                    double x = (ig + 0.5) * hr[0] + origin[0];
+                    double y = (jg + 0.5) * hr[1] + origin[1];
+                    double z = (kg + 0.5) * hr[2] + origin[2];
+                    //std::cout << std::to_string(y) + " " + std::to_string(gauss(y, 0.5, 0.25)) + "\n";
+                    if(i > 0 && j > 0 && k > 0 && i < view_a.extent(0) - 1 && j < view_a.extent(1) - 1 && k < view_a.extent(2) - 1){
+                        ref += std::abs(view_a(i, j, k)[2] - gauss(y, 0.5, 0.1)) * volume;
+                        //view_an1(i, j, k)[2] - gauss(y, 0.5, 0.1);
+                    }
+                    
+                    //if ((x == 0.5) && (y == 0.5) && (z == 0.5)){}
+                    //if(jg == nr[1] - 2){
+                        //view_rho(i, j, k) = sine(0, dt);
+                    //}
+            }, error_accumulation);
+            std::cout << "TOTAL ERROR: " << error_accumulation << std::endl;
         }
     }
+    exit:
     ippl::finalize();
 
     return 0;

@@ -100,7 +100,8 @@ namespace ippl {
         VField_t* En_mp;
         VField_t* Bn_mp;
         double total_energy;
-        double absorbed__energy;
+        using accumulation_type = __float128;
+        accumulation_type absorbed__energy;
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;
     };
