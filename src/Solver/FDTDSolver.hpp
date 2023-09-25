@@ -23,6 +23,7 @@
 #include "Field/Field.h"
 
 #include "FDTDSolver.h"
+#include <cinttypes>
 #include "Field/HaloCells.h"
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
@@ -76,17 +77,143 @@ axis_aligned_occlusion& operator&=(axis_aligned_occlusion& a, unsigned int b) {
     a = (axis_aligned_occlusion)(static_cast<unsigned int>(a) & b);
     return a;
 }
-struct second_order_abc{
-    constexpr static unsigned main_axis = 2;
-    constexpr static unsigned side_axis[] = {0, 1};
+template <typename View, typename Coords, unsigned int axis, size_t... Idx>
+KOKKOS_INLINE_FUNCTION constexpr decltype(auto) apply_impl_with_offset(const View& view,
+                                                           const Coords& coords,
+                                                           int offset,
+                                                           const std::index_sequence<Idx...>&) {
+    return view((coords[Idx] + offset * !!(Idx == axis))...);
+}
+template <typename View, typename Coords, unsigned axis>
+KOKKOS_INLINE_FUNCTION constexpr decltype(auto) apply_with_offset(const View& view, const Coords& coords, int offset) {
+    using Indices = std::make_index_sequence<ippl::ExtractExpressionRank::getRank<Coords>()>;
+    return apply_impl_with_offset<View, Coords, axis>(view, coords, offset, Indices{});
+}
+template<unsigned _main_axis, unsigned... _side_axes>
+struct first_order_abc{
+    constexpr static unsigned main_axis = _main_axis;
+    constexpr static unsigned side_axes[] = {_side_axes...};
+    ippl::Vector<double, 3> hr_m;
+    int sign;
+    double beta0;
+    double beta1;
+    double beta2;
+    double beta3;
+    double beta4;
+    first_order_abc(ippl::Vector<double, 3> hr, double c, double dt, int _sign) : hr_m(hr), sign(_sign) {
+        beta0 = (c * dt - hr_m[main_axis]) / (c * dt + hr_m[main_axis]);
+        beta1 = 2.0 * hr_m[main_axis] / (c * dt + hr_m[main_axis]);
+        beta2 = -1.0;
+        beta3 = beta1;
+        beta4 = beta0;
+    }
     template<typename view_type, typename Coords>
-    auto operator()(const view_type& a_n, const view_type& a_nm1, const Coords& c)const noexcept{
+    auto operator()(const view_type& a_n, const view_type& a_nm1,const view_type& a_np1, const Coords& c)const -> typename view_type::value_type{
+        using value_t = typename view_type::value_type;
+        
+        value_t ret = beta0 * (apply_with_offset<view_type, Coords, ~0u>(a_nm1, c, sign) + apply_with_offset<view_type, Coords, main_axis>(a_np1, c, sign))
+                    + beta1 * (apply_with_offset<view_type, Coords, ~0u>(a_n, c, sign) + apply_with_offset<view_type, Coords, main_axis>(a_n, c, sign))
+                    + beta2 * (apply_with_offset<view_type, Coords, main_axis>(a_nm1, c, sign));
+        return ret;
+    }
+};
+template<unsigned _main_axis, unsigned... _side_axes>
+struct second_order_abc{
+    constexpr static unsigned main_axis = _main_axis;
+    constexpr static unsigned side_axes[] = {_side_axes...};
+    ippl::Vector<double, 3> hr_m;
+    int sign;
+    double gamma0;
+    double gamma1;
+    double gamma2;
+    double gamma3;
+    double gamma4;
+    double gamma5;
+    double gamma6;
+    double gamma7;
+    double gamma8;
+    double gamma9;
+    double gamma10;
+    double gamma11;
+    double gamma12;
+    second_order_abc(ippl::Vector<double, 3> hr, double c, double dt, int _sign) : hr_m(hr), sign(_sign){
+        gamma0 = (c * dt - hr[main_axis]) / (c * dt + hr[main_axis]); 
+        gamma1 = hr[main_axis] * (2.0 - sq(c * dt / hr_m[side_axes[1]]) - sq(c * dt / hr_m[side_axes[0]]));
+        gamma2 = -1.0;
+        gamma3 = gamma1;
+        gamma4 = gamma0;
+        gamma5 = sq(c * dt / hr_m[side_axes[0]]) * hr_m[main_axis] / (2.0 * (c * dt + hr_m[main_axis]));
+        gamma6 = gamma5;
+        gamma7 = sq(c * dt / hr_m[side_axes[1]]) * hr_m[main_axis] / (2.0 * (c * dt + hr_m[main_axis]));
+        gamma8 = gamma7;
+        gamma9 = gamma6;
+        gamma10 = gamma0;
+        gamma11 = gamma8;
+        gamma12 = gamma8;
+    }
+    template<typename view_type, typename Coords>
+    auto operator()(const view_type& a_n, const view_type& a_nm1,const view_type& a_np1, const Coords& c)const -> typename view_type::value_type{
+        using value_t = typename view_type::value_type;
+        value_t ret(0.0);
+        ret += ippl::apply(a_nm1, c) * gamma0 + ippl::apply(a_n, c) * gamma1;
+        {
+            Coords acc = c;
+            acc[main_axis] += sign;
+            ret += gamma2 * ippl::apply(a_nm1, acc)
+             + gamma3 * ippl::apply(a_n, acc)
+             + gamma4 * ippl::apply(a_np1, acc);
+        }
+        {
+            Coords acc = c;
+            acc[main_axis] += sign;
+            acc[side_axes[0]] += 1;
+            ret += gamma5 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[main_axis] += sign;
+            acc[side_axes[0]] -= 1;
+            ret += gamma6 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[main_axis] += sign;
+            acc[side_axes[1]] += 1;
+            ret += gamma7 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[main_axis] += sign;
+            acc[side_axes[1]] -= 1;
+            ret += gamma8 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[side_axes[0]] += 1;
+            ret += gamma9 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[side_axes[0]] -= 1;
+            ret += gamma10 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[side_axes[1]] += 1;
+            ret += gamma11 * ippl::apply(a_n, acc);
+        }
+        {
+            Coords acc = c;
+            acc[side_axes[1]] -= 1;
+            ret += gamma12 * ippl::apply(a_n, acc);
+        }
 
+        return ret;
     }
     
 };
 template <typename... extent_types>
-std::array<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(
+KOKKOS_INLINE_FUNCTION std::array<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(
     size_t boundary_distance, const std::tuple<extent_types...>& _index,
     const std::tuple<extent_types...>& _extents) {
     constexpr size_t Dim = std::tuple_size_v<std::tuple<extent_types...>>;
@@ -186,8 +313,6 @@ namespace ippl {
         
         
 
-        ippl::Vector<double, 3> a, b;
-        double x = ippl::dot(a, b);
         //static_assert(std::is_invocable_v<ippl::Vector<double, 3>, int>);
         // preliminaries for Kokkos loops (ghost cells and views)
         phiNp1_m         = 0.0;
@@ -196,11 +321,15 @@ namespace ippl {
         auto view_phiNm1 = phiNm1_m.getView();
         auto view_phiNp1 = phiNp1_m.getView();
 
-        ippl::apply(view_phiN, ippl::Vector<int, 3>{1,2,3});
-
+        
         auto view_aN   = aN_m.getView();
         auto view_aNm1 = aNm1_m.getView();
         auto view_aNp1 = aNp1_m.getView();
+        #define _bc first_order_abc
+        _bc<0, 1, 2> abc_x[] = {_bc<0, 1, 2> (hr_m, c, dt,  1), _bc<0, 1, 2>(hr_m, c, dt, -1)};
+        _bc<1, 0, 2> abc_y[] = {_bc<1, 0, 2> (hr_m, c, dt,  1), _bc<1, 0, 2>(hr_m, c, dt, -1)};
+        _bc<2, 0, 1> abc_z[] = {_bc<2, 0, 1> (hr_m, c, dt,  1), _bc<2, 0, 1>(hr_m, c, dt, -1)};
+
 
         auto view_rhoN = this->rhoN_mp->getView();
         auto view_JN   = this->JN_mp->getView();
@@ -387,16 +516,31 @@ namespace ippl {
                                            + isXmax * xmax + isYmax * ymax + isZmax * zmax
                                            + isInterior * view_phiNp1(i, j, k);
                 });
-        if (false)
-            for (size_t gd = 0; gd < Dim; ++gd) {
+        //if (false)
+            for (size_t gd = 1; gd < 2; ++gd) {
+                std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(view_aN.extent(0), view_aN.extent(1), view_aN.extent(2));
                 Kokkos::parallel_for(
-                    "Vector potential ABCs", ippl::getRangePolicy(view_aN, nghost_a),
+                    "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
                     KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                         // global indices
+                        std::array<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, std::make_tuple(i, j, k), extenz);
                         const int ig = i + ldom[0].first() - nghost_a;
                         const int jg = j + ldom[1].first() - nghost_a;
                         const int kg = k + ldom[2].first() - nghost_a;
+                        //for(unsigned ax = 0;ax < Dim;ax++){
+                            if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
+                                //std::printf("Boundary: %lu, %lu, %lu\n", i, j, k);
+                                if(gd == 0)
+                                    view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                if(gd == 1)
+                                    view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                if(gd == 2){
+                                    view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
 
+                                }
+                            }
+                        return;
+                        //}
                         // boundary values: 1st order Absorbing Boundary Conditions
                         bool isXmin = ((ig == 0) && (jg > 0) && (kg > 0) && (jg < nr_m[1] - 1)
                                        && (kg < nr_m[2] - 1));
@@ -443,6 +587,7 @@ namespace ippl {
             }
         Kokkos::fence();
         //for (size_t gd = 0; gd < Dim; ++gd) {
+            //if(false)
             Kokkos::parallel_for(
                 "Periodic boundaryie", ippl::getRangePolicy(view_aNp1, 0),
                 KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -454,11 +599,11 @@ namespace ippl {
                         wraparound_i -= view_aN.extent(0) - 2 * nghost_a;
                     }
 
-                    if ((int)j < nghost_a) {
-                        wraparound_j += view_aN.extent(1) - 2 * nghost_a;
-                    } else if (j > view_aN.extent(1) - nghost_a - 1) {
-                        wraparound_j -= view_aN.extent(1) - 2 * nghost_a;
-                    }
+                    //if ((int)j < nghost_a) {
+                    //    wraparound_j += view_aN.extent(1) - 2 * nghost_a;
+                    //} else if (j > view_aN.extent(1) - nghost_a - 1) {
+                    //    wraparound_j -= view_aN.extent(1) - 2 * nghost_a;
+                    //}
 
                     if ((int)k < nghost_a) {
                         wraparound_k += view_aN.extent(2) - 2 * nghost_a;
@@ -637,10 +782,10 @@ namespace ippl {
                     if (ref != 0.0
                         && dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d] != 0.0
                         && d != 1 && normal[d] != 0.0) {
-                        double ratio =
-                            ((dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d]));
+                        double ratio =((dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d]));
                         // if(std::abs(ratio) > 1000.0)
                         // printf("Ratio: %f", ratio);
+                        (void)ratio;
                     }
                     ref += dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d];
                     if (false) {

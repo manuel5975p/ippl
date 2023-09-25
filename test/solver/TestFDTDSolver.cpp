@@ -238,21 +238,22 @@ int main(int argc, char* argv[]) {
                     double z = (kg + 0.5) * hr[2] + origin[2];
                     //std::cout << std::to_string(y) + " " + std::to_string(gauss(y, 0.5, 0.25)) + "\n";
                     //if(i > 0 && j > 0 && k > 0 && i < view_a.extent(0) - 1 && j < view_a.extent(1) - 1 && k < view_a.extent(2) - 1){
-                        view_a  (i, j, k)[2] = gauss(y, 0.5, 0.1);
-                        view_an1(i, j, k)[2] = gauss(y, 0.5, 0.1);
+                        view_a  (i, j, k)[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1);
+                        view_an1(i, j, k)[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1);
                     //}
-                    
+                    (void)x;
+                    (void)y;
+                    (void)z;
                     //if ((x == 0.5) && (y == 0.5) && (z == 0.5)){}
                     //if(jg == nr[1] - 2){
                         //view_rho(i, j, k) = sine(0, dt);
                     //}
             });
         }
-
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
-        dumpVTK(fieldB, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
+        dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
         solver.solve();
-        dumpVTK(fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
+        dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         for (unsigned int it = 1; it < iterations; ++it) {
             msg << "Timestep number = " << it << " , time = " << it * dt << endl;
@@ -275,9 +276,9 @@ int main(int argc, char* argv[]) {
                         double x = (ig + 0.5) * hr[0] + origin[0];
                         double y = (jg + 0.5) * hr[1] + origin[1];
                         double z = (kg + 0.5) * hr[2] + origin[2];
-                        //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                        //    view_a(i, j, k)[2] += (sine(it, dt) * dt);
-                        //if(jg == nr[1] - 2){
+                        (void)x;//if ((x == 0.5) && (y == 0.5) && (z == 0.5))
+                        (void)y;//    view_a(i, j, k)[2] += (sine(it, dt) * dt);
+                        (void)z;//if(jg == nr[1] - 2){
                         //    //puts("sed");
                         //    view_a(i, j, k) += ippl::Vector<double, 3>(sine(it, dt) * dt);
                         //}
@@ -287,20 +288,27 @@ int main(int argc, char* argv[]) {
             }
 
             solver.solve();
-
-            dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            
+            //dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
         }
         if (!seed) {
             // add pulse at center of domain
+            
             auto view_rho    = rho.getView();
             const int nghost = rho.getNghost();
             auto ldom        = layout.getLocalNDIndex();
             auto view_a      = solver.aN_m.getView();
+            auto view_b      = fieldB.getView();
+            auto view_e      = fieldE.getView();
+            
             auto view_an1    = solver.aNm1_m.getView();
+            //Kokkos::View<double***> energy_density("Energies", view_a.extent(0), view_a.extent(1),
+            //                                   view_a.extent(2));
+        
             double error_accumulation = 0.0;
-            const double volume = hr[0] * hr[1] * hr[2];
+            const double volume = (1.0 / (nr[0] - 6)) * (1.0 / (nr[1] - 6)) * (1.0 / (nr[2] - 6));
             Kokkos::parallel_reduce(
-                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a)/*rho.getFieldRangePolicy()*/,
+                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, 3)/*rho.getFieldRangePolicy()*/,
                 KOKKOS_LAMBDA(const int i, const int j, const int k, double& ref) {
                     const int ig = i + ldom[0].first() - nghost;
                     const int jg = j + ldom[1].first() - nghost;
@@ -312,10 +320,14 @@ int main(int argc, char* argv[]) {
                     double z = (kg + 0.5) * hr[2] + origin[2];
                     //std::cout << std::to_string(y) + " " + std::to_string(gauss(y, 0.5, 0.25)) + "\n";
                     if(i > 0 && j > 0 && k > 0 && i < view_a.extent(0) - 1 && j < view_a.extent(1) - 1 && k < view_a.extent(2) - 1){
-                        ref += std::abs(view_a(i, j, k)[2] - gauss(y, 0.5, 0.1)) * volume;
+                        //ref += (dot_prod(view_b(i, j, k), view_b(i, j, k)) + dot_prod(view_e(i, j, k), view_e(i, j, k))) * volume;
+                        ref += std::abs(view_a(i, j, k)[2]) * volume;
+                        //ref += std::abs(view_a(i, j, k)[2] - gauss(y, 0.5, 0.1)) * volume;
                         //view_an1(i, j, k)[2] - gauss(y, 0.5, 0.1);
                     }
-                    
+                    (void)x;
+                    (void)y;
+                    (void)z;
                     //if ((x == 0.5) && (y == 0.5) && (z == 0.5)){}
                     //if(jg == nr[1] - 2){
                         //view_rho(i, j, k) = sine(0, dt);

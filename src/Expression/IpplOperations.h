@@ -19,6 +19,7 @@
 #define IPPL_OPERATIONS_H
 
 #include <Kokkos_MathematicalFunctions.hpp>
+#include <concepts>
 #include <tuple>
 
 namespace ippl {
@@ -292,6 +293,9 @@ namespace ippl {
             template <typename... Args>
             KOKKOS_INLINE_FUNCTION auto operator()(Args... args) const {
                 return dot(u_m(args...), v_m(args...)).apply();
+            }
+            operator typename E1::value_type() const requires (!std::is_invocable_v<E1>) {
+                return apply();
             }
 
         private:
