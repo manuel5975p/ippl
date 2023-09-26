@@ -38,6 +38,8 @@ namespace ippl {
         typedef Field<Tfields, Dim, M, C> Field_t;
         typedef Vector<Tfields, Dim> Vector_t;
         typedef Field<Vector_t, Dim, M, C> VField_t;
+
+        ippl::Vector<ippl::FieldBC, Dim> bconds;
         using memory_space = typename Field_t::memory_space;
 
         // define type for field layout
@@ -47,7 +49,7 @@ namespace ippl {
         using buffer_type = Communicate::buffer_type<memory_space>;
 
         // constructor and destructor
-        FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B,
+        FDTDSolver(Field_t* charge, VField_t* current, VField_t* E, VField_t* B,
                    double timestep = 0.05, bool seed_ = false);
         ~FDTDSolver();
 
@@ -57,6 +59,7 @@ namespace ippl {
         // evaluates E and B fields using computed potentials
         double field_evaluation();
 
+        Tfields energy_content(int offset)const;
         // gaussian pulse
         double gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
 

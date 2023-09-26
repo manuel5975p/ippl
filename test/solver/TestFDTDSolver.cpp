@@ -206,7 +206,8 @@ int main(int argc, char* argv[]) {
         bool seed = false;
 
         // define an FDTDSolver object
-        ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, dt, seed);
+        ippl::FDTDSolver<double, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, seed);
+        fieldE.getFieldBC();
 
         /*
         std::cout << nr[0] << " " << current.getView().extent(0) << "\n";

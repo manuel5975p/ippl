@@ -258,16 +258,16 @@ KOKKOS_INLINE_FUNCTION std::array<axis_aligned_occlusion, sizeof...(extent_types
 namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
-    FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t& charge, VField_t& current, VField_t& E,
-                                               VField_t& B, double timestep, bool seed_) {
+    FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
+                                               VField_t* B, double timestep, bool seed_) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
-        rhoN_mp = &charge;
-        JN_mp   = &current;
+        rhoN_mp = charge;
+        JN_mp   = current;
 
         // same for E and B fields
-        En_mp = &E;
-        Bn_mp = &B;
+        En_mp = E;
+        Bn_mp = B;
 
         // initialize the time-step size
         this->dt = timestep;
@@ -626,6 +626,10 @@ namespace ippl {
         Kokkos::deep_copy(phiNm1_m.getView(), phiN_m.getView());
         Kokkos::deep_copy(phiN_m.getView(), phiNp1_m.getView());
     };
+    template <typename Tfields, unsigned Dim, class M, class C>
+    Tfields FDTDSolver<Tfields, Dim, M, C>::energy_content(int offset)const{
+
+    }
 
     template <typename Tfields, unsigned Dim, class M, class C>
     double FDTDSolver<Tfields, Dim, M, C>::field_evaluation() {

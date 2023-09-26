@@ -46,11 +46,12 @@ namespace ippl {
      * (to avoid conflict with particle BC enum, add _FACE)
      */
     enum FieldBC {
-        PERIODIC_FACE    = 0b0000,
-        CONSTANT_FACE    = 0b0001,
-        ZERO_FACE        = 0b0011,
-        EXTRAPOLATE_FACE = 0b0100,
-        NO_FACE          = 0b1000,
+        PERIODIC_FACE    = 0b00000,
+        CONSTANT_FACE    = 0b00001,
+        ZERO_FACE        = 0b00011,
+        EXTRAPOLATE_FACE = 0b00100,
+        NO_FACE          = 0b01000,
+        MUR_ABC_1ST      = 0b10000,
     };
 
     namespace detail {
@@ -88,6 +89,16 @@ namespace ippl {
             // True if this boundary condition changes physical cells.
             bool changePhysical_m;
         };
+        template<typename T>
+        struct extract_scalar{
+            using type = T;
+        };
+        template<typename T, unsigned Dim>
+        struct extract_scalar<Vector<T, Dim>>{
+            using type = T;
+        };
+        template<typename T>
+        using extract_scalar_t = extract_scalar<T>::type;
 
         template <typename Field>
         std::ostream& operator<<(std::ostream&, const BCondBase<Field>&);
@@ -186,6 +197,33 @@ namespace ippl {
 
     private:
         face_neighbor_type faceNeighbors_m;
+        typename Field::halo_type::databuffer_type haloData_m;
+    };
+        
+    template <typename Field>
+    class MurABC1st : public detail::BCondBase<Field> {
+        constexpr static unsigned Dim = Field::dim;
+        using T                       = typename Field::value_type;
+
+    public:
+        using face_neighbor_type = std::array<std::vector<int>, 2 * Dim>;
+        using scalar_type        = typename detail::extract_scalar<typename Field::value_type>::type;
+        using Layout_t           = typename detail::BCondBase<Field>::Layout_t;
+
+        MurABC1st(unsigned face, ippl::Vector<scalar_type, Dim> hr, scalar_type wave_speed, scalar_type delta_t)
+            : detail::BCondBase<Field>(face), hr_m(hr), c(wave_speed), dt(delta_t) {}
+
+        virtual FieldBC getBCType() const { return MUR_ABC_1ST; }
+
+        virtual void apply(Field& field);
+
+        virtual void write(std::ostream& out) const;
+
+    private:
+        //face_neighbor_type faceNeighbors_m;
+        ippl::Vector<scalar_type, Dim> hr_m;
+        scalar_type c;
+        scalar_type dt;
         typename Field::halo_type::databuffer_type haloData_m;
     };
 }  // namespace ippl
