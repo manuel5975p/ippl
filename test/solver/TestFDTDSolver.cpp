@@ -43,7 +43,10 @@ KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
 }
 KOKKOS_INLINE_FUNCTION double gauss(double x, double mean, double stddev) {
-    return 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev));
+    //return std::sin(x * M_PI * 2.0 * 1.0);
+    //return 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
+    return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
+    //return 100.0 * (std::max(0.0, 1.0 - std::abs(x - mean) / stddev));
 }
 
 void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
@@ -207,7 +210,9 @@ int main(int argc, char* argv[]) {
 
         // define an FDTDSolver object
         ippl::FDTDSolver<double, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, seed);
-        fieldE.getFieldBC();
+        solver.bconds[0] = ippl::PERIODIC_FACE;
+        solver.bconds[1] = ippl::PERIODIC_FACE;
+        solver.bconds[2] = ippl::PERIODIC_FACE;
 
         /*
         std::cout << nr[0] << " " << current.getView().extent(0) << "\n";
@@ -226,29 +231,14 @@ int main(int argc, char* argv[]) {
             auto ldom        = layout.getLocalNDIndex();
             auto view_a      = solver.aN_m.getView();
             auto view_an1    = solver.aNm1_m.getView();
-            Kokkos::parallel_for(
-                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a)/*rho.getFieldRangePolicy()*/,
-                KOKKOS_LAMBDA(const int i, const int j, const int k) {
-                    const int ig = i + ldom[0].first() - nghost;
-                    const int jg = j + ldom[1].first() - nghost;
-                    const int kg = k + ldom[2].first() - nghost;
-
-                    // define the physical points (cell-centered)
-                    double x = (ig + 0.5) * hr[0] + origin[0];
-                    double y = (jg + 0.5) * hr[1] + origin[1];
-                    double z = (kg + 0.5) * hr[2] + origin[2];
-                    //std::cout << std::to_string(y) + " " + std::to_string(gauss(y, 0.5, 0.25)) + "\n";
-                    //if(i > 0 && j > 0 && k > 0 && i < view_a.extent(0) - 1 && j < view_a.extent(1) - 1 && k < view_a.extent(2) - 1){
-                        view_a  (i, j, k)[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1);
-                        view_an1(i, j, k)[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1);
-                    //}
+            solver.fill_initialcondition(
+                KOKKOS_LAMBDA(double x, double y, double z) {
+                    ippl::Vector<double, 3> ret(0.0);
+                    ret[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1);
                     (void)x;
                     (void)y;
                     (void)z;
-                    //if ((x == 0.5) && (y == 0.5) && (z == 0.5)){}
-                    //if(jg == nr[1] - 2){
-                        //view_rho(i, j, k) = sine(0, dt);
-                    //}
+                    return ret;
             });
         }
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
@@ -265,27 +255,6 @@ int main(int argc, char* argv[]) {
                 auto view_a    = solver.aN_m.getView();
                 const int nghost = rho.getNghost();
                 auto ldom        = layout.getLocalNDIndex();
-
-                Kokkos::parallel_for(
-                    "Assign sine source at center", ippl::getRangePolicy(view_rho, nghost),
-                    KOKKOS_LAMBDA(const int i, const int j, const int k) {
-                        const int ig = i + ldom[0].first() - nghost;
-                        const int jg = j + ldom[1].first() - nghost;
-                        const int kg = k + ldom[2].first() - nghost;
-
-                        // define the physical points (cell-centered)
-                        double x = (ig + 0.5) * hr[0] + origin[0];
-                        double y = (jg + 0.5) * hr[1] + origin[1];
-                        double z = (kg + 0.5) * hr[2] + origin[2];
-                        (void)x;//if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                        (void)y;//    view_a(i, j, k)[2] += (sine(it, dt) * dt);
-                        (void)z;//if(jg == nr[1] - 2){
-                        //    //puts("sed");
-                        //    view_a(i, j, k) += ippl::Vector<double, 3>(sine(it, dt) * dt);
-                        //}
-                        //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                        //    view_rho(i, j, k) = sine(it, dt);
-                });
             }
 
             solver.solve();
@@ -308,8 +277,8 @@ int main(int argc, char* argv[]) {
         
             double error_accumulation = 0.0;
             const double volume = (1.0 / (nr[0] - 6)) * (1.0 / (nr[1] - 6)) * (1.0 / (nr[2] - 6));
-            Kokkos::parallel_reduce(
-                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, 3)/*rho.getFieldRangePolicy()*/,
+            /*Kokkos::parallel_reduce(
+                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, 3),
                 KOKKOS_LAMBDA(const int i, const int j, const int k, double& ref) {
                     const int ig = i + ldom[0].first() - nghost;
                     const int jg = j + ldom[1].first() - nghost;
@@ -333,7 +302,10 @@ int main(int argc, char* argv[]) {
                     //if(jg == nr[1] - 2){
                         //view_rho(i, j, k) = sine(0, dt);
                     //}
-            }, error_accumulation);
+            }, error_accumulation);*/
+            error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, double x, double y, double z){
+                return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
+            });
             std::cout << "TOTAL ERROR: " << error_accumulation << std::endl;
         }
     }

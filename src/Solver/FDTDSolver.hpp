@@ -471,7 +471,6 @@ namespace ippl {
 
         // apply 1st order Absorbing Boundary Conditions
         // for both scalar and vector potentials
-        if (false)
             Kokkos::parallel_for(
                 "Scalar potential ABCs", ippl::getRangePolicy(view_phiN, nghost_phi),
                 KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -516,8 +515,8 @@ namespace ippl {
                                            + isXmax * xmax + isYmax * ymax + isZmax * zmax
                                            + isInterior * view_phiNp1(i, j, k);
                 });
-        //if (false)
-            for (size_t gd = 1; gd < 2; ++gd) {
+            for (size_t gd = 0; gd < 3; ++gd) {
+                if(this->bconds[gd] != MUR_ABC_1ST)continue;
                 std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(view_aN.extent(0), view_aN.extent(1), view_aN.extent(2));
                 Kokkos::parallel_for(
                     "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
@@ -590,25 +589,28 @@ namespace ippl {
             //if(false)
             Kokkos::parallel_for(
                 "Periodic boundaryie", ippl::getRangePolicy(view_aNp1, 0),
-                KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+                KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                     size_t wraparound_i = i, wraparound_j = j, wraparound_k = k;
-
-                    if ((int)i < nghost_a) {
-                        wraparound_i += view_aN.extent(0) - 2 * nghost_a;
-                    } else if (i > view_aN.extent(0) - nghost_a - 1) {
-                        wraparound_i -= view_aN.extent(0) - 2 * nghost_a;
+                    if(bconds[0] == PERIODIC_FACE){
+                        if ((int)i < nghost_a) {
+                            wraparound_i += view_aN.extent(0) - 2 * nghost_a;
+                        } else if (i > view_aN.extent(0) - nghost_a - 1) {
+                            wraparound_i -= view_aN.extent(0) - 2 * nghost_a;
+                        }
                     }
-
-                    //if ((int)j < nghost_a) {
-                    //    wraparound_j += view_aN.extent(1) - 2 * nghost_a;
-                    //} else if (j > view_aN.extent(1) - nghost_a - 1) {
-                    //    wraparound_j -= view_aN.extent(1) - 2 * nghost_a;
-                    //}
-
-                    if ((int)k < nghost_a) {
-                        wraparound_k += view_aN.extent(2) - 2 * nghost_a;
-                    } else if (k > view_aN.extent(2) - nghost_a - 1) {
-                        wraparound_k -= view_aN.extent(2) - 2 * nghost_a;
+                    if(bconds[1] == PERIODIC_FACE){
+                        if ((int)j < nghost_a) {
+                            wraparound_j += view_aN.extent(1) - 2 * nghost_a;
+                        } else if (j > view_aN.extent(1) - nghost_a - 1) {
+                            wraparound_j -= view_aN.extent(1) - 2 * nghost_a;
+                        }
+                    }
+                    if(bconds[2] == PERIODIC_FACE){
+                        if ((int)k < nghost_a) {
+                            wraparound_k += view_aN.extent(2) - 2 * nghost_a;
+                        } else if (k > view_aN.extent(2) - nghost_a - 1) {
+                            wraparound_k -= view_aN.extent(2) - 2 * nghost_a;
+                        }
                     }
                     view_aNp1(i, j, k)[0] = view_aNp1(wraparound_i, wraparound_j, wraparound_k)[0];
                     view_aNp1(i, j, k)[1] = view_aNp1(wraparound_i, wraparound_j, wraparound_k)[1];
@@ -617,8 +619,8 @@ namespace ippl {
         //}
         Kokkos::fence();
         // evaluate E and B fields at N
-        std::cout << "Energy: " << (double)field_evaluation() << " "
-                  << (double)this->absorbed__energy << "\n";
+        //std::cout << "Energy: " << (double)field_evaluation() << " "
+        //          << (double)this->absorbed__energy << "\n";
 
         // store potentials at N in Nm1, and Np1 in N
         Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
@@ -626,10 +628,6 @@ namespace ippl {
         Kokkos::deep_copy(phiNm1_m.getView(), phiN_m.getView());
         Kokkos::deep_copy(phiN_m.getView(), phiNp1_m.getView());
     };
-    template <typename Tfields, unsigned Dim, class M, class C>
-    Tfields FDTDSolver<Tfields, Dim, M, C>::energy_content(int offset)const{
-
-    }
 
     template <typename Tfields, unsigned Dim, class M, class C>
     double FDTDSolver<Tfields, Dim, M, C>::field_evaluation() {
@@ -869,4 +867,48 @@ namespace ippl {
         aN_m   = 0.0;
         aNp1_m = 0.0;
     };
+    template<typename Tfields, unsigned Dim, class M, class C>
+    void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(auto c){
+        auto view_a      = aN_m.getView();
+        auto view_an1    = aNm1_m.getView();
+        auto ldom = aN_m.getDomain();
+        int nghost = aN_m.getNghost();
+        Kokkos::parallel_for(
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
+                const int ig = i + ldom[0].first() - nghost;
+                const int jg = j + ldom[1].first() - nghost;
+                const int kg = k + ldom[2].first() - nghost;
+
+                double x = (ig + 0.5) * hr_m[0];// + origin[0];
+                double y = (jg + 0.5) * hr_m[1];// + origin[1];
+                double z = (kg + 0.5) * hr_m[2];// + origin[2];
+                view_a  (i, j, k) = c(x, y, z);
+                view_an1(i, j, k) = c(x, y, z);
+            }
+        );
+    }
+    template<typename Tfields, unsigned Dim, class M, class C>
+    Tfields FDTDSolver<Tfields, Dim, M, C>::volumetric_integral(auto c){
+        auto view_a      = aN_m.getView();
+        auto view_an1    = aNm1_m.getView();
+        auto ldom = aN_m.getDomain();
+        int nghost = aN_m.getNghost();
+        Tfields ret = 0.0;
+        Tfields volume = hr_m[0] * hr_m[1] * hr_m[2];
+        Kokkos::parallel_reduce(
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k, double& ref){
+                
+                const int ig = i + ldom[0].first() - nghost;
+                const int jg = j + ldom[1].first() - nghost;
+                const int kg = k + ldom[2].first() - nghost;
+
+                double x = (ig + 0.5) * hr_m[0];// + origin[0];
+                double y = (jg + 0.5) * hr_m[1];// + origin[1];
+                double z = (kg + 0.5) * hr_m[2];// + origin[2];
+
+                ref += c(i, j, k, x, y, z) * volume;
+            }, ret
+        );
+        return ret;
+    }
 }  // namespace ippl

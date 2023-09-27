@@ -59,12 +59,16 @@ namespace ippl {
         // evaluates E and B fields using computed potentials
         double field_evaluation();
 
-        Tfields energy_content(int offset)const;
         // gaussian pulse
         double gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
 
         // initialization of FDTD solver
         void initialize();
+
+        
+        void fill_initialcondition(auto c);
+
+        Tfields volumetric_integral(auto c);
 
     public:
         // mesh and layout objects
