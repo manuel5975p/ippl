@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <functional>
+#include "Field/BcTypes.h"
 
 #include "Utility/IpplException.h"
 #include "Utility/IpplTimings.h"
