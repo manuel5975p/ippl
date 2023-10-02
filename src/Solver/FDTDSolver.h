@@ -26,7 +26,26 @@
 
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
+template <class PLayout>
+struct Bunch : public ippl::ParticleBase<PLayout> {
+    Bunch(PLayout& playout)
+        : ippl::ParticleBase<PLayout>(playout) {
+        this->addAttribute(Q);
+        this->addAttribute(v);
+        this->addAttribute(E_gather);
+        this->addAttribute(B_gather);
+    }
 
+    ~Bunch() {}
+    
+    using charge_container_type   = ippl::ParticleAttrib             <double    >;
+    using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
+    using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
+    charge_container_type Q;
+    velocity_container_type v;
+    vector_container_type E_gather;
+    vector_container_type B_gather;
+};
 namespace ippl {
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<double, Dim>,
               class C = typename M::DefaultCentering>
@@ -107,8 +126,14 @@ namespace ippl {
         VField_t* En_mp;
         VField_t* Bn_mp;
         double total_energy;
-        using accumulation_type = __float128;
+        using accumulation_type = double;
         accumulation_type absorbed__energy;
+
+        using playout_type = ippl::ParticleSpatialLayout<double, 3>;
+        using bunch_type = ::Bunch<playout_type>;
+        playout_type pl;
+        ::Bunch<ippl::ParticleSpatialLayout<double, 3>> bunch;
+
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;
     };

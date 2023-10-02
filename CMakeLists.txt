@@ -21,6 +21,7 @@ endif ()
 add_compile_options (-Wall)
 add_compile_options (-Wunused)
 add_compile_options (-Wextra)
+add_compile_options (-Wno-unused-variable)
 #add_compile_options (-Werror)
 
 # allow deprecated functions

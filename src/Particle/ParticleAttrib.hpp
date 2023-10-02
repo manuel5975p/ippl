@@ -172,6 +172,58 @@ namespace ippl {
 
     template <typename T, class... Properties>
     template <typename Field, typename P2>
+    void ParticleAttrib<T, Properties...>::scatter(
+        Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp1,
+                  const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp2, T dt_scale) const{
+        constexpr unsigned Dim = Field::dim;
+
+        static IpplTimings::TimerRef scatterTimer = IpplTimings::getTimer("scatter");
+        IpplTimings::startTimer(scatterTimer);
+        using view_type = typename Field::view_type;
+        view_type view  = f.getView();
+
+        using mesh_type       = typename Field::Mesh_t;
+        const mesh_type& mesh = f.get_mesh();
+
+        using vector_type = typename mesh_type::vector_type;
+        using value_type  = typename ParticleAttrib<T, Properties...>::value_type;
+
+        const vector_type& dx     = mesh.getMeshSpacing();
+        const vector_type& origin = mesh.getOrigin();
+        const vector_type invdx   = 1.0 / dx;
+
+        const FieldLayout<Dim>& layout = f.getLayout();
+        const NDIndex<Dim>& lDom       = layout.getLocalNDIndex();
+        const int nghost               = f.getNghost();
+
+        using policy_type = Kokkos::RangePolicy<execution_space>;
+
+        Kokkos::parallel_for(
+            "ParticleAttrib::scatter", policy_type(0, *(this->localNum_mp)),
+            KOKKOS_CLASS_LAMBDA(const size_t idx) {
+                // find nearest grid point
+                vector_type from                 = (pp1(idx) - origin) * invdx + 0.5;
+                vector_type to                   = (pp2(idx) - origin) * invdx + 0.5;
+                //Vector<int, Field::dim> index = l;
+                //Vector<T, Field::dim> whi     = l - index;
+                //Vector<T, Field::dim> wlo     = 1.0 - whi;
+
+                //Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
+
+                // scatter
+                const value_type& val = dview_m(idx);
+                detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, dt_scale);
+            });
+        IpplTimings::stopTimer(scatterTimer);
+
+        static IpplTimings::TimerRef accumulateHaloTimer = IpplTimings::getTimer("accumulateHalo");
+        IpplTimings::startTimer(accumulateHaloTimer);
+        f.accumulateHalo();
+        IpplTimings::stopTimer(accumulateHaloTimer);
+    }
+
+    template <typename T, class... Properties>
+    template <typename Field, typename P2>
     void ParticleAttrib<T, Properties...>::gather(
         Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp) {
         constexpr unsigned Dim = Field::dim;

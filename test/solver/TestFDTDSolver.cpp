@@ -31,22 +31,23 @@
 #include "Ippl.h"
 
 #include <cstdlib>
+#include <decl/Kokkos_Declare_OPENMP.hpp>
 #include <fstream>
-#include <functional>
 #include "Field/BcTypes.h"
+#include "Types/Vector.h"
 
-#include "Utility/IpplException.h"
-#include "Utility/IpplTimings.h"
-
+#include "Particle/ParticleAttrib.h"
 #include "Solver/FDTDSolver.h"
+
+
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
 }
 KOKKOS_INLINE_FUNCTION double gauss(double x, double mean, double stddev) {
-    //return std::sin(x * M_PI * 2.0 * 1.0);
+    return std::sin(x * M_PI * 2.0 * 1.0);
     //return 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
-    return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
+    //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
     //return 100.0 * (std::max(0.0, 1.0 - std::abs(x - mean) / stddev));
 }
 
@@ -140,6 +141,7 @@ int main(int argc, char* argv[]) {
 
         const unsigned int Dim = 3;
 
+
         // get the gridsize from the user
         ippl::Vector<int, Dim> nr = {std::atoi(argv[1]), std::atoi(argv[2]), std::atoi(argv[3])};
 
@@ -173,6 +175,7 @@ int main(int argc, char* argv[]) {
         ippl::Vector<double, Dim> hr     = {dx, dy, dz};
         ippl::Vector<double, Dim> origin = {0.0, 0.0, 0.0};
         Mesh_t mesh(owned, hr, origin);
+        
         // CFL condition lambda = c*dt/h < 1/sqrt(d) = 0.57 for d = 3
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
@@ -183,16 +186,19 @@ int main(int argc, char* argv[]) {
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
 
+        //Define particle layout and bunch
+        
+        //bunch.create(100);
+        //bunch.setParticleBC(ippl::NO);
+        //bunch.Q = 1.0;
+        //bunch.R = 0.5 + hr[0] * 0.5;
+        //std::cout << bunch.R.getView()(0) << "\n";
+        //std::cout << bunch.Q.getView()(0) << "\n";
+        //std::cin.get();
+
         // define the R (rho) field
         Field_t rho;
         rho.initialize(mesh, layout);
-        //lambda_dispatch(rho, 1, 
-        //KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ){
-        //    //std::printf("%ld, %ld, %ld, %s\n", i, j, k, to_string(occ).c_str());
-        //},
-        //KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
-        //    
-        //});
         // define the Vector field E (LHS)
         VField_t fieldE, fieldB;
         fieldE.initialize(mesh, layout);
@@ -224,14 +230,18 @@ int main(int argc, char* argv[]) {
         std::cout << nr[2] << " " << solver.aN_m.getView().extent(2) << "\n";
         return 0;
         */
-
+        //bunch.Q.scatter(rho, bunch.R);
+        //std::cout << rho.getView()(nr[0] / 2, nr[1] / 2, nr[2] / 2) << "\n";
+        //std::cin.get();
         if (!seed) {
+
             // add pulse at center of domain
             auto view_rho    = rho.getView();
-            const int nghost = rho.getNghost();
-            auto ldom        = layout.getLocalNDIndex();
+            //const int nghost = rho.getNghost();
+            //auto ldom        = layout.getLocalNDIndex();
             auto view_a      = solver.aN_m.getView();
             auto view_an1    = solver.aNm1_m.getView();
+            if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(double x, double y, double z) {
                     ippl::Vector<double, 3> ret(0.0);
@@ -243,41 +253,40 @@ int main(int argc, char* argv[]) {
             });
         }
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
-        dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
+        dumpVTK(fieldE, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
         solver.solve();
-        dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
+        dumpVTK(fieldE, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         for (unsigned int it = 1; it < iterations; ++it) {
             msg << "Timestep number = " << it << " , time = " << it * dt << endl;
 
             if (!seed) {
                 // add pulse at center of domain
-                auto view_rho    = rho.getView();
-                auto view_a    = solver.aN_m.getView();
-                const int nghost = rho.getNghost();
-                auto ldom        = layout.getLocalNDIndex();
+                //auto view_rho    = rho.getView();
+                //auto view_a    = solver.aN_m.getView();
+                //const int nghost = rho.getNghost();
+                //auto ldom        = layout.getLocalNDIndex();
             }
 
             solver.solve();
-            
-            //dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            dumpVTK(fieldE, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
         }
         if (!seed) {
             // add pulse at center of domain
             
-            auto view_rho    = rho.getView();
-            const int nghost = rho.getNghost();
-            auto ldom        = layout.getLocalNDIndex();
-            auto view_a      = solver.aN_m.getView();
-            auto view_b      = fieldB.getView();
-            auto view_e      = fieldE.getView();
+            [[maybe_unused]] auto view_rho    = rho.getView();
+            [[maybe_unused]] const int nghost = rho.getNghost();
+            [[maybe_unused]] auto ldom        = layout.getLocalNDIndex();
+            [[maybe_unused]] auto view_a      = solver.aN_m.getView();
+            [[maybe_unused]] auto view_b      = fieldB.getView();
+            [[maybe_unused]] auto view_e      = fieldE.getView();
             
             auto view_an1    = solver.aNm1_m.getView();
             //Kokkos::View<double***> energy_density("Energies", view_a.extent(0), view_a.extent(1),
             //                                   view_a.extent(2));
         
             double error_accumulation = 0.0;
-            const double volume = (1.0 / (nr[0] - 6)) * (1.0 / (nr[1] - 6)) * (1.0 / (nr[2] - 6));
+            //const double volume = (1.0 / (nr[0] - 6)) * (1.0 / (nr[1] - 6)) * (1.0 / (nr[2] - 6));
             /*Kokkos::parallel_reduce(
                 "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, 3),
                 KOKKOS_LAMBDA(const int i, const int j, const int k, double& ref) {
@@ -306,6 +315,9 @@ int main(int argc, char* argv[]) {
             }, error_accumulation);*/
             error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, double x, double y, double z){
                 return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
+                (void)i;(void)x;
+                (void)j;(void)y;
+                (void)k;(void)z;
             });
             std::cout << "TOTAL ERROR: " << error_accumulation << std::endl;
         }
