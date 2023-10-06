@@ -133,6 +133,8 @@ namespace ippl {
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             const Vector<T, Dim>& wlo, const Vector<T, Dim>& whi,
             const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale) {
+            //std::cout << args[0] << " " << args[1] << " " << args[2] << std::endl;
+            assert(((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...));
             typename ippl::detail::ViewType<ippl::Vector<T, Dim>,
                                             Dim>::view_type::value_type::value_type* destptr =
                 &(view(zigzag_interpolationIndex<ScatterPoint, Index>(args)...)[0]);
@@ -151,49 +153,80 @@ namespace ippl {
             return 0;
         }
 
+        /**
+         * This function performs a zigzag scatter operation from a field to a view.
+         * 
+         * @tparam ScatterPoint The scatter points to be used.
+         * @tparam T The data type of the field and view.
+         * @tparam Dim The dimensionality of the field and view.
+         * @tparam IndexType The index type used for indexing.
+         * @param view The view to scatter into.
+         * @param from The starting position of the scatter operation.
+         * @param to The ending position of the scatter operation.
+         * @param hr The grid spacing.
+         * @param scale The scaling factor to apply during the scatter operation. This is usually set to the inverse of the timestep.
+         */
         template <unsigned long... ScatterPoint, typename T, unsigned Dim, typename IndexType>
         KOKKOS_INLINE_FUNCTION constexpr void zigzag_scatterToField(
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             const Vector<T, Dim>& from, const Vector<T, Dim>& to,
-            const Vector<T, Dim>& hr /*Grid Spacing*/, T scale) {
+            const Vector<T, Dim>& hr, T scale) {
+            
+            // Define utility functions
             using Kokkos::floor;
             using Kokkos::max;
             using Kokkos::min;
-            auto fracf = KOKKOS_LAMBDA(auto x) {
-                return x - floor(x);
+            constexpr auto fracf = KOKKOS_LAMBDA(double x) {
+                return x - floor(x); // Return the fractional part of x value between 0 and 1
             };
-            // The number of indices is Dim
+            Vector<T, Dim> from_in_grid_coordinates;
+            Vector<T, Dim> to_in_grid_coordinates;
+            // Calculate the indices for the scatter operation
             ippl::Vector<IndexType, Dim> fromi, toi;
             for (unsigned int i = 0; i < Dim; i++) {
-                fromi[i] = Kokkos::floor(from[i] / hr[i]);
-                toi[i]   = Kokkos::floor(to[i] / hr[i]);
-                // std::cout << "toi[" << i << "] = " << toi[i] << "\n";
-            }
-            ippl::Vector<T, Dim> relay;
-            for (unsigned int i = 0; i < Dim; i++) {
-                relay[i] = relay[i] =
-                    min(min(fromi[i], toi[i]) * hr[i] + hr[i],
-                        max(max(fromi[i], toi[i]) * hr[i], 0.5 * (to[i] + from[i])));
+                from_in_grid_coordinates[i] = from / hr[i];
+                to_in_grid_coordinates  [i] = to / hr[i];
+                fromi[i] = Kokkos::floor(from_in_grid_coordinates[i]);
+                toi[i]   = Kokkos::floor(to_in_grid_coordinates[i]);
             }
 
+            // Calculate the relay point for each dimension
+            ippl::Vector<T, Dim> relay;
+            for (unsigned int i = 0; i < Dim; i++) {
+                relay[i] =
+                min(
+                    min(fromi[i], toi[i]) * hr[i] + hr[i],
+                    max(
+                        max(fromi[i], toi[i]) * hr[i],
+                        0.5 * (to[i] + from[i])
+                    )
+                );
+            }
+
+            // Calculate jcfrom and jcto
             ippl::Vector<T, Dim> jcfrom, jcto;
             jcfrom = relay;
             jcfrom -= from;
             jcto = to;
             jcto -= relay;
+
+            // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;
             for (unsigned i = 0; i < Dim; i++) {
                 wlo[i] = 1.0 - fracf((from[i] + relay[i]) * 0.5);
                 whi[i] = fracf((from[i] + relay[i]) * 0.5);
             }
 
-            // wlo = fracvec(Vector<T, Dim>((from + relay) * 0.5f));
-            // whi = fracvec(Vector<T, Dim>((from + relay) * -0.5f));
+            // Perform the scatter operation for each scatter point
             [[maybe_unused]] auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, fromi, jcfrom, scale)
                  ^ ...);
+            for (unsigned i = 0; i < Dim; i++) {
+                wlo[i] = 1.0 - fracf((to[i] + relay[i]) * 0.5);
+                whi[i] = fracf((to[i] + relay[i]) * 0.5);
+            }
             [[maybe_unused]] auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, toi, jcto, scale)

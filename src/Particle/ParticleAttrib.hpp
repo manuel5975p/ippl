@@ -115,7 +115,7 @@ namespace ippl {
 
         using policy_type = Kokkos::RangePolicy<execution_space>;
         Kokkos::parallel_for(
-            "ParticleAttrib::operator=()", policy_type(0, *(this->localNum_mp)),
+            "ParticleAttrib::operator=()", policy_type(0, /*dview_m.extent(0)*/*(this->localNum_mp)),
             KOKKOS_CLASS_LAMBDA(const size_t i) { dview_m(i) = expr_(i); });
         return *this;
     }
@@ -151,6 +151,10 @@ namespace ippl {
             KOKKOS_CLASS_LAMBDA(const size_t idx) {
                 // find nearest grid point
                 vector_type l                 = (pp(idx) - origin) * invdx + 0.5;
+                for(unsigned int i = 0; i < Dim; ++i){
+                    assert(l(i) >= 0);
+                    assert(l(i) < view.extent(i));
+                }
                 Vector<int, Field::dim> index = l;
                 Vector<T, Field::dim> whi     = l - index;
                 Vector<T, Field::dim> wlo     = 1.0 - whi;
@@ -202,8 +206,8 @@ namespace ippl {
             "ParticleAttrib::scatter", policy_type(0, *(this->localNum_mp)),
             KOKKOS_CLASS_LAMBDA(const size_t idx) {
                 // find nearest grid point
-                vector_type from                 = (pp1(idx) - origin) * invdx + 0.5;
-                vector_type to                   = (pp2(idx) - origin) * invdx + 0.5;
+                vector_type from                 = (pp1(idx) - origin);// * invdx + 0.5;
+                vector_type to                   = (pp2(idx) - origin);// * invdx + 0.5;
                 //Vector<int, Field::dim> index = l;
                 //Vector<T, Field::dim> whi     = l - index;
                 //Vector<T, Field::dim> wlo     = 1.0 - whi;
@@ -211,6 +215,12 @@ namespace ippl {
                 //Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
 
                 // scatter
+                for(unsigned int i = 0; i < Dim; ++i){
+                    assert(from(i) >= 0);
+                    assert(from(i) < view.extent(i));
+                    assert(to(i) >= 0);
+                    assert(to(i) < view.extent(i));
+                }
                 const value_type& val = dview_m(idx);
                 detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, dt_scale);
             });

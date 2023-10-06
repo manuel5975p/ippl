@@ -32,6 +32,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
         : ippl::ParticleBase<PLayout>(playout) {
         this->addAttribute(Q);
         this->addAttribute(v);
+        this->addAttribute(R_np1);
         this->addAttribute(E_gather);
         this->addAttribute(B_gather);
     }
@@ -43,6 +44,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
     charge_container_type Q;
     velocity_container_type v;
+    typename ippl::ParticleBase<PLayout>::particle_position_type R_np1;
     vector_container_type E_gather;
     vector_container_type B_gather;
 };
@@ -133,6 +135,7 @@ namespace ippl {
         using bunch_type = ::Bunch<playout_type>;
         playout_type pl;
         ::Bunch<ippl::ParticleSpatialLayout<double, 3>> bunch;
+        size_t particle_count;
 
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;

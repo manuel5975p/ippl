@@ -44,7 +44,7 @@
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
 }
-KOKKOS_INLINE_FUNCTION double gauss(double x, double mean, double stddev) {
+KOKKOS_INLINE_FUNCTION double gauss([[maybe_unused]] double x, [[maybe_unused]] double mean, [[maybe_unused]] double stddev) {
     return std::sin(x * M_PI * 2.0 * 1.0);
     //return 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
     //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
@@ -243,12 +243,12 @@ int main(int argc, char* argv[]) {
             auto view_an1    = solver.aNm1_m.getView();
             if(false)
             solver.fill_initialcondition(
-                KOKKOS_LAMBDA(double x, double y, double z) {
+                KOKKOS_LAMBDA([[maybe_unused]] double x, [[maybe_unused]] double y, [[maybe_unused]] double z) {
                     ippl::Vector<double, 3> ret(0.0);
                     ret[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1);
-                    (void)x;
-                    (void)y;
-                    (void)z;
+                    //(void)x;
+                    //(void)y;
+                    //(void)z;
                     return ret;
             });
         }

@@ -259,7 +259,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
-                                               VField_t* B, double timestep, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl) {
+                                               VField_t* B, double timestep, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(1000) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = charge;
@@ -286,14 +286,15 @@ namespace ippl {
     void FDTDSolver<Tfields, Dim, M, C>::solve() {
         // physical constant
         // using scalar;// = typename Tfields::BareField_t::value_type::
-
-        constexpr double c        = 1.0;  // 299792458.0;
+        constexpr double c        = 1.0;  // 299792458.0; 
         constexpr double mu0      = 1.0;  // 1.25663706212e-6;
         constexpr double epsilon0 = 1.0 / (c * c * mu0);
         *this->rhoN_mp = 0.0;
         bunch.Q.scatter(*this->rhoN_mp, bunch.R);
         //std::cout << bunch.Q.getView()(10) << "\n";
-        //std::cout << phiN_m.getView()(5,5,5) << "\n";
+        std::cout << rhoN_mp->getView()(5,5,5) << "\n";
+        std::cout << this->En_mp->getView()(3,5,5) << "\n";
+        std::cout << phiN_m.getView()(3,5,5) << "\n";
         
         
 
@@ -631,21 +632,23 @@ namespace ippl {
 
         // store potentials at N in Nm1, and Np1 in N
         field_evaluation();
-        playout_type::particle_position_type R_np1;
         bunch.E_gather.gather(*this->En_mp, bunch.R);
         bunch.B_gather.gather(*this->Bn_mp, bunch.R);
         constexpr double e_mass = 0.5110;
         constexpr double e_charge = -0.30282212088;
         auto crpd = bunch.Q * ippl::cross(bunch.v, bunch.B_gather);
 
-        //bunch.v += crpd;// * e_mass;
-
-        bunch.Q.scatter(*this->JN_mp, bunch.R, R_np1, 1.0 / dt);
-
+        bunch.v = bunch.v + (crpd / e_mass + bunch.E_gather * e_charge / e_mass);
+        bunch.R_np1 = bunch.R + bunch.v * dt;
+        this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again 
+        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
+        Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
+        
+        //Copy potential at N-1 and N+1 to phiNm1 and phiN for next time step
         Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
         Kokkos::deep_copy(aN_m.getView(), aNp1_m.getView());
         Kokkos::deep_copy(phiNm1_m.getView(), phiN_m.getView());
-        Kokkos::deep_copy(phiN_m.getView(), phiNp1_m.getView());
+        Kokkos::deep_copy(phiN_m.getView(), phiNp1_m.getView()); 
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
@@ -867,9 +870,11 @@ namespace ippl {
         constexpr double mu0      = 1.0;  // 1.25663706212e-6;
         constexpr double epsilon0 = 1.0 / (c * c * mu0);
         constexpr double electron_charge = -0.30282212088;
-        bunch.create(1000);
+        bunch.create(particle_count);
         bunch.Q = electron_charge;
-        bunch.R = 0.5;
+        bunch.R = ippl::Vector<double, 3>(0.5);
+        bunch.v = ippl::Vector<double, 3>{0.0, 2.0, 0.0};
+        bunch.R_np1 = ippl::Vector<double, 3>(0.5);
         // get layout and mesh
         layout_mp = &(this->rhoN_mp->getLayout());
         mesh_mp   = &(this->rhoN_mp->get_mesh());
