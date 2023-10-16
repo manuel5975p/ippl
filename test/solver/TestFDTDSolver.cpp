@@ -44,9 +44,9 @@ KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
 }
 KOKKOS_INLINE_FUNCTION double gauss(double x, double mean, double stddev) {
-    //return std::sin(x * M_PI * 2.0 * 1.0);
+    return std::sin(x * M_PI * 2.0 * 1.0);
     //return 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
-    return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
+    //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
     //return 100.0 * (std::max(0.0, 1.0 - std::abs(x - mean) / stddev));
 }
 
@@ -207,13 +207,13 @@ int main(int argc, char* argv[]) {
         current = 0.0;
 
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
-        bool seed = false;
+        bool seed = true;
 
         // define an FDTDSolver object
         ippl::FDTDSolver<double, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, seed);
-        solver.bconds[0] = ippl::PERIODIC_FACE;
-        solver.bconds[1] = ippl::PERIODIC_FACE;
-        solver.bconds[2] = ippl::PERIODIC_FACE;
+        solver.bconds[0] = ippl::MUR_ABC_1ST;
+        solver.bconds[1] = ippl::MUR_ABC_1ST;
+        solver.bconds[2] = ippl::MUR_ABC_1ST;
 
         /*
         std::cout << nr[0] << " " << current.getView().extent(0) << "\n";
@@ -247,6 +247,7 @@ int main(int argc, char* argv[]) {
         solver.solve();
         dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
+        //if(false)
         for (unsigned int it = 1; it < iterations; ++it) {
             msg << "Timestep number = " << it << " , time = " << it * dt << endl;
 
@@ -260,7 +261,7 @@ int main(int argc, char* argv[]) {
 
             solver.solve();
             
-            //dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
         }
         if (!seed) {
             // add pulse at center of domain
@@ -305,7 +306,7 @@ int main(int argc, char* argv[]) {
                     //}
             }, error_accumulation);*/
             error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, double x, double y, double z){
-                return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
+                return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1) /* std::cos(dt * 2.0 * M_PI)*/);
             });
             std::cout << "TOTAL ERROR: " << error_accumulation << std::endl;
         }

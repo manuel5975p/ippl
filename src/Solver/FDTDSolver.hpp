@@ -406,7 +406,7 @@ namespace ippl {
                         const int ig = i + ldom[0].first() - nghost_a;
                         const int jg = j + ldom[1].first() - nghost_a;
                         const int kg = k + ldom[2].first() - nghost_a;
-
+                        std::array<axis_aligned_occlusion, 3> occl = boundary_occlusion_of(1, std::make_tuple(i, j, k), std::make_tuple<size_t, size_t, size_t>(nr_m[0], nr_m[1], nr_m[2]));
                         // SF boundary in all 3 dimensions
                         bool isXmin_SF = ((ig == 1) && (jg > 1) && (kg > 1) && (jg < nr_m[1] - 2)
                                           && (kg < nr_m[2] - 2));
@@ -428,6 +428,7 @@ namespace ippl {
                         double zmax_SF = -a6 * gaussian(iteration, i, j, k);
 
                         // TF boundary
+                        
                         bool isXmin_TF = ((ig == 2) && (jg > 2) && (kg > 2) && (jg < nr_m[1] - 3)
                                           && (kg < nr_m[2] - 3));
                         double xmin_TF = -a2 * gaussian(iteration, i, j, k);
