@@ -50,8 +50,85 @@ KOKKOS_INLINE_FUNCTION double gauss([[maybe_unused]] double x, [[maybe_unused]] 
     //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
     //return 100.0 * (std::max(0.0, 1.0 - std::abs(x - mean) / stddev));
 }
+template<typename T, unsigned Dim>
+std::string povstring(const ippl::Vector<T, Dim>& v){
+    std::stringstream sstr;
+    sstr << '<';
+    for(size_t i = 0;i < Dim;i++){
+        sstr << v[i];
+        if(Dim && (i < Dim - 1)){
+            sstr << ',';
+        }
+    }
+    sstr << '>';
+    return sstr.str();
+}
+void dumpPOV(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
+                         ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
+             int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
+         using Mesh_t      = ippl::UniformCartesian<double, 3>;
+    using Centering_t = Mesh_t::DefaultCentering;
+    typedef ippl::Field<ippl::Vector<double, 3>, 3, Mesh_t, Centering_t> VField_t;
+    typename VField_t::view_type::host_mirror_type host_view = E.getHostMirror();
 
-void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
+    std::stringstream fname;
+    constexpr char endl = '\n';
+    fname << "data/ef_";
+    fname << std::setw(4) << std::setfill('0') << iteration;
+    fname << ".pov";
+
+    Kokkos::deep_copy(host_view, E.getView());
+
+    std::ofstream vtkout(fname.str());
+    vtkout << R"(
+#include "colors.inc"
+#include "glass.inc"
+#include "metals.inc"
+#version 3.7;
+global_settings {
+  assumed_gamma 1.0
+  max_trace_level 15
+  photons {
+    count 10000
+  }
+  radiosity{
+    pretrace_start 0.04
+    pretrace_end 0.01
+    count 100
+    recursion_limit 5
+    nearest_count 10
+    error_bound 0.3
+  }
+}
+camera {
+  location    <0,-10,-10>
+  right       x*image_width/image_height
+  look_at     <0, 0, 0>
+  angle       50
+}
+light_source {
+  <5, 10, 0>
+  color rgb <1,1,1>
+  photons {
+    reflection on
+    refraction on
+  }
+}
+    )";
+    for (int x = 0; x < nx + 2; x++) {
+        for (int y = 0; y < ny + 2; y++) {
+            for (int z = 0; z < nz + 2; z++) {
+                vtkout << "sphere{\n";
+                vtkout << povstring(ippl::Vector<double, 3>{(double)x, (double)y, (double)z}) << ", 0.2\n";
+                vtkout << "texture {pigment{rgb <0,1,0>}}\n";
+                vtkout << "}\n";
+                //vtkout << host_view(x, y, z)[0] << "\t" << host_view(x, y, z)[1] << "\t"
+                //       << host_view(x, y, z)[2] << endl;
+            }
+        }
+    }
+}
+void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
                          ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
              int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
     using Mesh_t      = ippl::UniformCartesian<double, 3>;
@@ -82,13 +159,17 @@ void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<doub
     vtkout << "CELL_DATA " << (nx + 2) * (ny + 2) * (nz + 2) << endl;
 
     vtkout << "VECTORS E-Field float" << endl;
-    for (int z = 0; z < nz + 2; z++) {
+    for (int x = 0; x < nx + 2; x++) {
         for (int y = 0; y < ny + 2; y++) {
-            for (int x = 0; x < nx + 2; x++) {
+            for (int z = 0; z < nz + 2; z++) {
                 vtkout << host_view(x, y, z)[0] << "\t" << host_view(x, y, z)[1] << "\t"
                        << host_view(x, y, z)[2] << endl;
             }
         }
+    }
+    vtkout << "----\n";
+    for (size_t z = 0; z < pbunch.getLocalNum();z++) {
+        vtkout << pbunch.R.getView()(z)[0] << " " << pbunch.R.getView()(z)[1] << " " << pbunch.R.getView()(z)[2] << "\n";
     }
 }
 
@@ -124,9 +205,9 @@ void dumpVTK(ippl::Field<double, 3, ippl::UniformCartesian<double, 3>,
 
     vtkout << "SCALARS Rho float" << endl;
     vtkout << "LOOKUP_TABLE default" << endl;
-    for (int z = 0; z < nz + 2; z++) {
+    for (int x = 0; x < nx + 2; x++) {
         for (int y = 0; y < ny + 2; y++) {
-            for (int x = 0; x < nx + 2; x++) {
+            for (int z = 0; z < nz + 2; z++) {
                 vtkout << host_view(x, y, z) << endl;
             }
         }
@@ -180,7 +261,7 @@ int main(int argc, char* argv[]) {
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
         const double c = 1.0;  // 299792458.0;
-        double dt      = std::min({dx, dy, dz}) * 0.5 / c;
+        double dt      = std::min({dx, dy, dz}) * 0.125 / c;
         unsigned int iterations = std::ceil(time_simulated / dt);
         dt = time_simulated / (double)iterations;
         // all parallel layout, standard domain, normal axis order
@@ -209,7 +290,12 @@ int main(int argc, char* argv[]) {
         // define current = 0
         VField_t current;
         current.initialize(mesh, layout);
-        
+        std::stringstream sstr;
+        sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[0].first() << " to " << current.getLayout().getLocalNDIndex()[0].last() << "\n";
+        sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[1].first() << " to " << current.getLayout().getLocalNDIndex()[1].last() << "\n";
+        sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[2].first() << " to " << current.getLayout().getLocalNDIndex()[2].last() << "\n";
+        std::cout << sstr.str() << std::endl;
+        return 0;
         current = 0.0;
 
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
@@ -253,9 +339,9 @@ int main(int argc, char* argv[]) {
             });
         }
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
-        dumpVTK(fieldE, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
+        dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
         solver.solve();
-        dumpVTK(fieldE, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
+        dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         for (unsigned int it = 1; it < iterations; ++it) {
             msg << "Timestep number = " << it << " , time = " << it * dt << endl;
@@ -269,8 +355,12 @@ int main(int argc, char* argv[]) {
             }
 
             solver.solve();
-            dumpVTK(fieldE, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            if(it == iterations / 2){
+                dumpPOV(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            }
         }
+        
         if (!seed) {
             // add pulse at center of domain
             

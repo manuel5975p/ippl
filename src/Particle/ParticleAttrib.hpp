@@ -197,7 +197,7 @@ namespace ippl {
         const vector_type invdx   = 1.0 / dx;
 
         const FieldLayout<Dim>& layout = f.getLayout();
-        const NDIndex<Dim>& lDom       = layout.getLocalNDIndex();
+        const NDIndex<Dim> lDom       = layout.getLocalNDIndex();
         const int nghost               = f.getNghost();
 
         using policy_type = Kokkos::RangePolicy<execution_space>;
@@ -222,7 +222,7 @@ namespace ippl {
                     assert(to(i) < view.extent(i));
                 }
                 const value_type& val = dview_m(idx);
-                detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, dt_scale);
+                detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, dt_scale, lDom, nghost);
             });
         IpplTimings::stopTimer(scatterTimer);
 

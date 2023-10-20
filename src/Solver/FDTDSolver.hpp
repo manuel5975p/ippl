@@ -210,8 +210,18 @@ struct second_order_abc{
 
         return ret;
     }
-    
 };
+template <typename... index_and_extent_types>
+KOKKOS_INLINE_FUNCTION size_t boundary_distance(index_and_extent_types&&... x){
+    std::tuple<index_and_extent_types...> tp{x...};
+    constexpr size_t hsize = sizeof...(index_and_extent_types) / 2;
+    auto difference_minimizer = KOKKOS_LAMBDA<size_t... Index>(const std::index_sequence<Index...>& seq){
+        size_t min_to_0 = std::min({std::get<Index>(tp)...});
+        size_t min_to_extent = std::min({(std::get<Index + hsize>(tp) - std::get<Index>(tp) - 1)...});
+        return std::min(min_to_0, min_to_extent);
+    };
+    return difference_minimizer(std::make_index_sequence<sizeof...(index_and_extent_types) / 2>{});
+}
 template <typename... extent_types>
 KOKKOS_INLINE_FUNCTION std::array<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(
     size_t boundary_distance, const std::tuple<extent_types...>& _index,
@@ -259,7 +269,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
-                                               VField_t* B, double timestep, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(1000) {
+                                               VField_t* B, double timestep, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(1) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = charge;
@@ -289,12 +299,12 @@ namespace ippl {
         constexpr double c        = 1.0;  // 299792458.0; 
         constexpr double mu0      = 1.0;  // 1.25663706212e-6;
         constexpr double epsilon0 = 1.0 / (c * c * mu0);
-        *this->rhoN_mp = 0.0;
-        bunch.Q.scatter(*this->rhoN_mp, bunch.R);
+        //*this->rhoN_mp = 0.0;
+        //bunch.Q.scatter(*this->rhoN_mp, bunch.R);
         //std::cout << bunch.Q.getView()(10) << "\n";
-        std::cout << rhoN_mp->getView()(5,5,5) << "\n";
-        std::cout << this->En_mp->getView()(3,5,5) << "\n";
-        std::cout << phiN_m.getView()(3,5,5) << "\n";
+        //std::cout << rhoN_mp->getView()(5,5,5) << "\n";
+        //std::cout << this->En_mp->getView()(3,5,5) << "\n";
+        //std::cout << phiN_m.getView()(3,5,5) << "\n";
         
         
 
@@ -634,14 +644,34 @@ namespace ippl {
         field_evaluation();
         bunch.E_gather.gather(*this->En_mp, bunch.R);
         bunch.B_gather.gather(*this->Bn_mp, bunch.R);
+        auto gammabeta_view = bunch.gamma_beta.getView();
+        auto rview = bunch.R.getView();
+        auto rnp1view = bunch.R_np1.getView();
+        auto E_gatherview = bunch.E_gather.getView();
+        auto B_gatherview = bunch.B_gather.getView();
         constexpr double e_mass = 0.5110;
         constexpr double e_charge = -0.30282212088;
-        auto crpd = bunch.Q * ippl::cross(bunch.v, bunch.B_gather);
+        Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(const size_t i){
+            const ippl::Vector<double, 3> pgammabeta = gammabeta_view(i);
+            
+            
+            const ippl::Vector<double, 3> t1 = pgammabeta - e_charge * dt * E_gatherview(i) / (2.0 * e_mass); 
+            const double alpha = -e_charge * dt / (2 * e_mass * Kokkos::sqrt(1 + dot_prod(t1, t1)));
+            const ippl::Vector<double, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
 
-        bunch.v = bunch.v + (crpd / e_mass + bunch.E_gather * e_charge / e_mass);
-        bunch.R_np1 = bunch.R + bunch.v * dt;
-        this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again 
+            const ippl::Vector<double, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
+            const ippl::Vector<double, 3> ngammabeta = t3 - e_charge * dt * E_gatherview(i) / (2.0 * e_mass);
+
+            rnp1view(i) = rview(i) + dt * ngammabeta / (Kokkos::sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));            
+        });
+        //auto crpd = bunch.Q * ippl::cross(bunch.gamma_beta, bunch.B_gather);
+        //bunch.gamma_beta = bunch.gamma_beta + (crpd / e_mass + bunch.E_gather * e_charge / e_mass);
+        //bunch.R_np1 = bunch.R + bunch.gamma_beta * dt;
+        this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
+        //for(size_t i = 0;i < JN_mp->getView().extent(1);i++)
+        //    JN_mp->getView()(20, i, 20) = ippl::Vector<double, 3>{0,1,0};
         bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
+        //bunch.layout_m->update()
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
         
         //Copy potential at N-1 and N+1 to phiNm1 and phiN for next time step
@@ -699,7 +729,14 @@ namespace ippl {
                 KOKKOS_LAMBDA(size_t i, size_t j, size_t k) { CAST_TO_VOID(i, j, k); });
 
         (*Bn_mp) = 0.5 * (curl(aN_m) + curl(aNp1_m));
-
+        auto bdiv = ippl::div(*Bn_mp);
+        double divi = volumetric_integral(KOKKOS_LAMBDA([[maybe_unused]] size_t i, [[maybe_unused]] size_t j, [[maybe_unused]] size_t k, [[maybe_unused]] double x, [[maybe_unused]] double y, [[maybe_unused]] double z) -> double{
+            
+            if(boundary_distance(i,j,k,Bn_mp->getView().extent(0),Bn_mp->getView().extent(1), Bn_mp->getView().extent(2)) > 0)
+                return bdiv(i, j, k);
+            return 0.0;
+        });
+        std::cout << "Divergence Integral = " << divi << "\n";
         // electric field is the time derivative of the vector potential
         // minus the gradient of the scalar potential
         (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
@@ -873,7 +910,7 @@ namespace ippl {
         bunch.create(particle_count);
         bunch.Q = electron_charge;
         bunch.R = ippl::Vector<double, 3>(0.5);
-        bunch.v = ippl::Vector<double, 3>{0.0, 2.0, 0.0};
+        bunch.gamma_beta = ippl::Vector<double, 3>{0.0, 0.8, 0.0};
         bunch.R_np1 = ippl::Vector<double, 3>(0.5);
         // get layout and mesh
         layout_mp = &(this->rhoN_mp->getLayout());
@@ -884,7 +921,6 @@ namespace ippl {
         domain_m = layout_mp->getDomain();
         for (unsigned int i = 0; i < Dim; ++i)
             nr_m[i] = domain_m[i].length();
-
         // initialize fields
         phiNm1_m.initialize(*mesh_mp, *layout_mp);
         phiN_m.initialize(*mesh_mp, *layout_mp);

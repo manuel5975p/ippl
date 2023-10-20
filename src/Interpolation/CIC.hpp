@@ -171,13 +171,13 @@ namespace ippl {
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             const Vector<T, Dim>& from, const Vector<T, Dim>& to,
-            const Vector<T, Dim>& hr, T scale) {
+            const Vector<T, Dim>& hr, T scale, const NDIndex<Dim> lDom, int nghost) {
             
             // Define utility functions
             using Kokkos::floor;
             using Kokkos::max;
             using Kokkos::min;
-            constexpr auto fracf = KOKKOS_LAMBDA(double x) {
+            constexpr auto fractional_part = KOKKOS_LAMBDA(double x) {
                 return x - floor(x); // Return the fractional part of x value between 0 and 1
             };
             Vector<T, Dim> from_in_grid_coordinates;
@@ -185,11 +185,13 @@ namespace ippl {
             // Calculate the indices for the scatter operation
             ippl::Vector<IndexType, Dim> fromi, toi;
             for (unsigned int i = 0; i < Dim; i++) {
-                from_in_grid_coordinates[i] = from / hr[i];
-                to_in_grid_coordinates  [i] = to / hr[i];
+                from_in_grid_coordinates[i] = from[i] / hr[i];
+                to_in_grid_coordinates  [i] = to[i] / hr[i];
                 fromi[i] = Kokkos::floor(from_in_grid_coordinates[i]);
                 toi[i]   = Kokkos::floor(to_in_grid_coordinates[i]);
             }
+            fromi = fromi - lDom.first();
+            toi = toi - lDom.first();
 
             // Calculate the relay point for each dimension
             ippl::Vector<T, Dim> relay;
@@ -214,8 +216,8 @@ namespace ippl {
             // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;
             for (unsigned i = 0; i < Dim; i++) {
-                wlo[i] = 1.0 - fracf((from[i] + relay[i]) * 0.5);
-                whi[i] = fracf((from[i] + relay[i]) * 0.5);
+                wlo[i] = 1.0 - fractional_part((from[i] + relay[i]) * 0.5 / hr[i]);
+                whi[i] = fractional_part((from[i] + relay[i]) * 0.5 / hr[i]);
             }
 
             // Perform the scatter operation for each scatter point
@@ -224,8 +226,8 @@ namespace ippl {
                                                      whi, fromi, jcfrom, scale)
                  ^ ...);
             for (unsigned i = 0; i < Dim; i++) {
-                wlo[i] = 1.0 - fracf((to[i] + relay[i]) * 0.5);
-                whi[i] = fracf((to[i] + relay[i]) * 0.5);
+                wlo[i] = 1.0 - fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
+                whi[i] = fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
             }
             [[maybe_unused]] auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,

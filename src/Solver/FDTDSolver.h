@@ -31,7 +31,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     Bunch(PLayout& playout)
         : ippl::ParticleBase<PLayout>(playout) {
         this->addAttribute(Q);
-        this->addAttribute(v);
+        this->addAttribute(gamma_beta);
         this->addAttribute(R_np1);
         this->addAttribute(E_gather);
         this->addAttribute(B_gather);
@@ -43,7 +43,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
     using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
     charge_container_type Q;
-    velocity_container_type v;
+    velocity_container_type gamma_beta;
     typename ippl::ParticleBase<PLayout>::particle_position_type R_np1;
     vector_container_type E_gather;
     vector_container_type B_gather;

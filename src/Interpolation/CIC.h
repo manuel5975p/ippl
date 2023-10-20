@@ -165,7 +165,7 @@ namespace ippl {
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             const Vector<T, Dim>& from, const Vector<T, Dim>& to,
-            const Vector<T, Dim>& hr /*Grid Spacing*/, T scale);
+            const Vector<T, Dim>& hr /*Grid Spacing*/, T scale, NDIndex<Dim> lDom, int nghost);
     }  // namespace detail
 }  // namespace ippl
 
