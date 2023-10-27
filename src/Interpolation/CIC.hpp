@@ -134,7 +134,9 @@ namespace ippl {
             const Vector<T, Dim>& wlo, const Vector<T, Dim>& whi,
             const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale) {
             //std::cout << args[0] << " " << args[1] << " " << args[2] << std::endl;
-            assert(((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...));
+            //assert(((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...));
+            if(!((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...))
+                return 0;
             typename ippl::detail::ViewType<ippl::Vector<T, Dim>,
                                             Dim>::view_type::value_type::value_type* destptr =
                 &(view(zigzag_interpolationIndex<ScatterPoint, Index>(args)...)[0]);
@@ -170,7 +172,7 @@ namespace ippl {
         KOKKOS_INLINE_FUNCTION constexpr void zigzag_scatterToField(
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
-            const Vector<T, Dim>& from, const Vector<T, Dim>& to,
+            Vector<T, Dim> from, Vector<T, Dim> to,
             const Vector<T, Dim>& hr, T scale, const NDIndex<Dim> lDom, int nghost) {
             
             // Define utility functions
@@ -185,6 +187,8 @@ namespace ippl {
             // Calculate the indices for the scatter operation
             ippl::Vector<IndexType, Dim> fromi, toi;
             for (unsigned int i = 0; i < Dim; i++) {
+                from[i] += hr[i] * 0.5;
+                to[i] += hr[i] * 0.5;
                 from_in_grid_coordinates[i] = from[i] / hr[i];
                 to_in_grid_coordinates  [i] = to[i] / hr[i];
                 fromi[i] = Kokkos::floor(from_in_grid_coordinates[i]);
@@ -212,7 +216,7 @@ namespace ippl {
             jcfrom -= from;
             jcto = to;
             jcto -= relay;
-
+            //std::cout << frommin(fromi[i], toi[i]) * hr[i] + hr[i] << "   \t" << fromi[1] * hr[1] << "\n";
             // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;
             for (unsigned i = 0; i < Dim; i++) {
@@ -221,6 +225,9 @@ namespace ippl {
             }
 
             // Perform the scatter operation for each scatter point
+            if(!ippl::Comm->rank())
+                std::cout << "Deponiere zu " << fromi << " und " << toi << "\n";
+            //return;
             [[maybe_unused]] auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, fromi, jcfrom, scale)

@@ -55,6 +55,7 @@ namespace ippl {
              */
             Kokkos::RangePolicy<typename particle_position_type::execution_space> policy{
                 0, (unsigned)R.getParticleCount()};
+            
             for (unsigned face = 0; face < 2 * Dim; ++face) {
                 // unsigned face = i % Dim;
                 unsigned d   = face / 2;

@@ -218,6 +218,7 @@ KOKKOS_INLINE_FUNCTION size_t boundary_distance(index_and_extent_types&&... x){
     auto difference_minimizer = KOKKOS_LAMBDA<size_t... Index>(const std::index_sequence<Index...>& seq){
         size_t min_to_0 = std::min({std::get<Index>(tp)...});
         size_t min_to_extent = std::min({(std::get<Index + hsize>(tp) - std::get<Index>(tp) - 1)...});
+        (void)seq;
         return std::min(min_to_0, min_to_extent);
     };
     return difference_minimizer(std::make_index_sequence<sizeof...(index_and_extent_types) / 2>{});
@@ -299,12 +300,7 @@ namespace ippl {
         constexpr double c        = 1.0;  // 299792458.0; 
         constexpr double mu0      = 1.0;  // 1.25663706212e-6;
         constexpr double epsilon0 = 1.0 / (c * c * mu0);
-        //*this->rhoN_mp = 0.0;
-        //bunch.Q.scatter(*this->rhoN_mp, bunch.R);
-        //std::cout << bunch.Q.getView()(10) << "\n";
-        //std::cout << rhoN_mp->getView()(5,5,5) << "\n";
-        //std::cout << this->En_mp->getView()(3,5,5) << "\n";
-        //std::cout << phiN_m.getView()(3,5,5) << "\n";
+
         
         
 
@@ -331,6 +327,11 @@ namespace ippl {
         // preliminaries for Kokkos loops (ghost cells and views)
         phiNp1_m         = 0.0;
         aNp1_m           = 0.0;
+        aN_m.fillHalo();
+        aNm1_m.fillHalo();
+        phiN_m.fillHalo();
+        phiNm1_m.fillHalo();
+
         auto view_phiN   = phiN_m.getView();
         auto view_phiNm1 = phiNm1_m.getView();
         auto view_phiNp1 = phiNp1_m.getView();
@@ -352,6 +353,10 @@ namespace ippl {
         const int nghost_a   = aN_m.getNghost();
         const auto& ldom     = layout_mp->getLocalNDIndex();
 
+        //aNm1_m.fillHalo();
+        
+
+        //JN_mp->fillHalo();
         // compute scalar potential and vector potential at next time-step
         // first, only the interior points are updated
         // then, if the user has set a seed, the seed is added via TF/SF boundaries
@@ -387,8 +392,8 @@ namespace ippl {
                     const int kg = k + ldom[2].first() - nghost_a;
 
                     // interior values
-                    bool isInterior = ((ig >= 0) && (jg >= 0) && (kg >= 0) && (ig < nr_m[0])
-                                       && (jg < nr_m[1]) && (kg < nr_m[2]));
+                    bool isInterior = true;//((ig >= 0) && (jg >= 0) && (kg >= 0) && (ig < nr_m[0])
+                                           //&& (jg < nr_m[1]) && (kg < nr_m[2]));
                     double interior = -view_aNm1(i, j, k)[gd] + a1 * view_aN(i, j, k)[gd]
                                       + a2 * (view_aN(i + 1, j, k)[gd] + view_aN(i - 1, j, k)[gd])
                                       + a4 * (view_aN(i, j + 1, k)[gd] + view_aN(i, j - 1, k)[gd])
@@ -407,7 +412,7 @@ namespace ippl {
         Kokkos::fence();
 
         // add seed field via TF/SF boundaries
-        if (seed) {
+        if (seed && false) {
             iteration++;
 
             // the scattered field boundary is the 2nd point after the boundary
@@ -482,7 +487,7 @@ namespace ippl {
             }
         }
         Kokkos::fence();
-
+            
         // apply 1st order Absorbing Boundary Conditions
         // for both scalar and vector potentials
             Kokkos::parallel_for(
@@ -529,28 +534,35 @@ namespace ippl {
                                            + isXmax * xmax + isYmax * ymax + isZmax * zmax
                                            + isInterior * view_phiNp1(i, j, k);
                 });
+            //bool isBoundary = (lDomains[myRank][d].max() == domain[d].max())
+            //                  || (lDomains[myRank][d].min() == domain[d].min());
             for (size_t gd = 0; gd < 3; ++gd) {
                 if(this->bconds[gd] != MUR_ABC_1ST)continue;
-                std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(view_aN.extent(0), view_aN.extent(1), view_aN.extent(2));
+                std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(nr_m[0] + 2, nr_m[1] + 2, nr_m[2] + 2);
                 Kokkos::parallel_for(
                     "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
                     KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                         // global indices
-                        std::array<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, std::make_tuple(i, j, k), extenz);
-                        const int ig = i + ldom[0].first() - nghost_a;
-                        const int jg = j + ldom[1].first() - nghost_a;
-                        const int kg = k + ldom[2].first() - nghost_a;
+                        const int ig = i + ldom[0].first();// - nghost_a;
+                        const int jg = j + ldom[1].first();// - nghost_a;
+                        const int kg = k + ldom[2].first();// - nghost_a;
+
+                        if((ig | jg | kg) < 0)std::abort(); //Any negative
+
+                        std::array<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, std::make_tuple((size_t)ig, (size_t)jg, (size_t)kg), extenz);
+                        
                         //for(unsigned ax = 0;ax < Dim;ax++){
                             if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
-                                //std::printf("Boundary: %lu, %lu, %lu\n", i, j, k);
+                                if(ippl::Comm->rank() == 7){
+                                    //std::printf("Loc Boundary: %lu, %lu, %lu\n Global: %d %d %d\n", i, j, k, ig, jg, kg);
+                                    //std::printf("Boundary: %lu, %lu, %lu\n", i, j, k);
+                                }
                                 if(gd == 0)
                                     view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                                 if(gd == 1)
                                     view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-                                if(gd == 2){
+                                if(gd == 2)
                                     view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-
-                                }
                             }
                         return;
                         //}
@@ -600,7 +612,7 @@ namespace ippl {
             }
         Kokkos::fence();
         //for (size_t gd = 0; gd < Dim; ++gd) {
-            //if(false)
+            if(false)
             Kokkos::parallel_for(
                 "Periodic boundaryie", ippl::getRangePolicy(view_aNp1, 0),
                 KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -642,6 +654,8 @@ namespace ippl {
 
         // store potentials at N in Nm1, and Np1 in N
         field_evaluation();
+        
+
         bunch.E_gather.gather(*this->En_mp, bunch.R);
         bunch.B_gather.gather(*this->Bn_mp, bunch.R);
         auto gammabeta_view = bunch.gamma_beta.getView();
@@ -670,10 +684,12 @@ namespace ippl {
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
         //for(size_t i = 0;i < JN_mp->getView().extent(1);i++)
         //    JN_mp->getView()(20, i, 20) = ippl::Vector<double, 3>{0,1,0};
-        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
-        //bunch.layout_m->update()
-        Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
+        //bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
         
+        //bunch.layout_m->update();
+        Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
+        bunch_type bunch_buffer(pl);
+        pl.update(bunch, bunch_buffer);
         //Copy potential at N-1 and N+1 to phiNm1 and phiN for next time step
         Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
         Kokkos::deep_copy(aN_m.getView(), aNp1_m.getView());
@@ -736,7 +752,7 @@ namespace ippl {
                 return bdiv(i, j, k);
             return 0.0;
         });
-        std::cout << "Divergence Integral = " << divi << "\n";
+        ///std::cout << "Divergence Integral = " << divi << "\n";
         // electric field is the time derivative of the vector potential
         // minus the gradient of the scalar potential
         (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
@@ -846,7 +862,7 @@ namespace ippl {
                     if (ref != 0.0
                         && dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d] != 0.0
                         && d != 1 && normal[d] != 0.0) {
-                        double ratio =((dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d]));
+                        double ratio = ((dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d]));
                         // if(std::abs(ratio) > 1000.0)
                         // printf("Ratio: %f", ratio);
                         (void)ratio;
@@ -909,8 +925,8 @@ namespace ippl {
         constexpr double electron_charge = -0.30282212088;
         bunch.create(particle_count);
         bunch.Q = electron_charge;
-        bunch.R = ippl::Vector<double, 3>(0.5);
-        bunch.gamma_beta = ippl::Vector<double, 3>{0.0, 0.8, 0.0};
+        bunch.R = ippl::Vector<double, 3>(0.4);
+        bunch.gamma_beta = ippl::Vector<double, 3>{0.0, 1e6, 0.0};
         bunch.R_np1 = ippl::Vector<double, 3>(0.5);
         // get layout and mesh
         layout_mp = &(this->rhoN_mp->getLayout());
@@ -942,7 +958,8 @@ namespace ippl {
     void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(auto c){
         auto view_a      = aN_m.getView();
         auto view_an1    = aNm1_m.getView();
-        auto ldom = aN_m.getDomain();
+        auto ldom = layout_mp->getLocalNDIndex();
+        std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = aN_m.getNghost();
         Kokkos::parallel_for(
             "Assign sinusoidal source at center", ippl::getRangePolicy(view_a), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
@@ -950,9 +967,9 @@ namespace ippl {
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;
 
-                double x = (ig + 0.5) * hr_m[0];// + origin[0];
-                double y = (jg + 0.5) * hr_m[1];// + origin[1];
-                double z = (kg + 0.5) * hr_m[2];// + origin[2];
+                double x = (double(ig) + 0.5) * hr_m[0];// + origin[0];
+                double y = (double(jg) + 0.5) * hr_m[1];// + origin[1];
+                double z = (double(kg) + 0.5) * hr_m[2];// + origin[2];
                 view_a  (i, j, k) = c(x, y, z);
                 view_an1(i, j, k) = c(x, y, z);
             }
@@ -962,7 +979,7 @@ namespace ippl {
     Tfields FDTDSolver<Tfields, Dim, M, C>::volumetric_integral(auto c){
         auto view_a      = aN_m.getView();
         auto view_an1    = aNm1_m.getView();
-        auto ldom = aN_m.getDomain();
+        auto ldom = layout_mp->getLocalNDIndex();
         int nghost = aN_m.getNghost();
         Tfields ret = 0.0;
         Tfields volume = hr_m[0] * hr_m[1] * hr_m[2];

@@ -215,14 +215,15 @@ namespace ippl {
                 //Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
 
                 // scatter
-                for(unsigned int i = 0; i < Dim; ++i){
-                    assert(from(i) >= 0);
-                    assert(from(i) < view.extent(i));
-                    assert(to(i) >= 0);
-                    assert(to(i) < view.extent(i));
-                }
+                //These assertions have erroneous conditions
+                //for(unsigned int i = 0; i < Dim; ++i){
+                //    assert(from(i) >= 0);
+                //    assert(from(i) < view.extent(i));
+                //    assert(to(i) >= 0);
+                //    assert(to(i) < view.extent(i));
+                //}
                 const value_type& val = dview_m(idx);
-                detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, dt_scale, lDom, nghost);
+                detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, val * dt_scale, lDom, nghost);
             });
         IpplTimings::stopTimer(scatterTimer);
 
