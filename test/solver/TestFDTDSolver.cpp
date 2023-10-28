@@ -40,11 +40,15 @@
 #include "Solver/FDTDSolver.h"
 
 
-
-KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
-    return 100 * std::sin(n * dt);
+template<typename T, typename R>
+KOKKOS_INLINE_FUNCTION auto sine(T n, R dt) {
+    using Kokkos::sin;
+    return 100.0 * sin(n * dt);
 }
-KOKKOS_INLINE_FUNCTION double gauss([[maybe_unused]] double x, [[maybe_unused]] double mean, [[maybe_unused]] double stddev) {
+KOKKOS_INLINE_FUNCTION auto gauss(double x, double mean, double stddev) {
+    (void)x;
+    (void)mean;
+    (void)stddev;
     //return std::sin(x * M_PI * 2.0 * 1.0);
     return std::exp(-(x - mean) * (x - mean) / (stddev * stddev));
     //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
@@ -63,12 +67,13 @@ std::string povstring(const ippl::Vector<T, Dim>& v){
     sstr << '>';
     return sstr.str();
 }
-void dumpPOV([[maybe_unused]] const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, [[maybe_unused]]  ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
-                         ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
-             [[maybe_unused]] int nx,[[maybe_unused]]  int ny,[[maybe_unused]]  int nz,[[maybe_unused]]  int iteration, [[maybe_unused]] double dx,[[maybe_unused]]  double dy,[[maybe_unused]]  double dz) {
-         using Mesh_t      = ippl::UniformCartesian<double, 3>;
+template<typename scalar>
+void dumpPOV(const typename ippl::FDTDSolver<scalar, 3>::bunch_type& pbunch,  ippl::Field<ippl::Vector<scalar, 3>, 3, ippl::UniformCartesian<scalar, 3>,
+                         typename ippl::UniformCartesian<scalar, 3>::DefaultCentering>& E,
+             int nx, int ny, int nz, int iteration, scalar dx, scalar dy, scalar dz) {
+         using Mesh_t      = ippl::UniformCartesian<scalar, 3>;
     using Centering_t = Mesh_t::DefaultCentering;
-    typedef ippl::Field<ippl::Vector<double, 3>, 3, Mesh_t, Centering_t> VField_t;
+    typedef ippl::Field<ippl::Vector<scalar, 3>, 3, Mesh_t, Centering_t> VField_t;
     typename VField_t::view_type::host_mirror_type host_view = E.getHostMirror();
 
     std::stringstream fname;
@@ -128,17 +133,18 @@ light_source {
         }
     }
 }
-Kokkos::View<ippl::Vector<double, 3>***> collect_field_on_zero(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
-                         ippl::UniformCartesian<double, 3>::DefaultCentering>& E, int nx, int ny, int nz){
+template<typename scalar>
+Kokkos::View<ippl::Vector<scalar, 3>***> collect_field_on_zero(ippl::Field<ippl::Vector<scalar, 3>, 3, ippl::UniformCartesian<scalar, 3>,
+                         typename ippl::UniformCartesian<scalar, 3>::DefaultCentering>& E, int nx, int ny, int nz){
     
     ippl::NDIndex<3U> lindex = E.getLayout().getLocalNDIndex();
-    std::vector<std::pair<ippl::NDIndex<3>, std::vector<double>>> ret;
+    std::vector<std::pair<ippl::NDIndex<3>, std::vector<scalar>>> ret;
     
     //unsigned volume = 1;
     //for(int i = 0;i < 3;i++){
     //    volume *= (lindex[i].last() - lindex[i].first());
     //}
-    std::vector<ippl::Vector<double, 3>> local_field_dump;
+    std::vector<ippl::Vector<scalar, 3>> local_field_dump;
 
     //int lindex_xextent = lindex[0].last() - lindex[0].first() + 1;
     //if(lindex_xextent != E.getFieldRangePolicy(1).m_upper[0] - E.getFieldRangePolicy(1).m_lower[0]){
@@ -146,9 +152,9 @@ Kokkos::View<ippl::Vector<double, 3>***> collect_field_on_zero(ippl::Field<ippl:
     //    throw 5;
     //}
     //if(E.getFieldRangePolicy(1).m_upper[0] - E.getFieldRangePolicy(1).m_lower[0] != nx){std::cout << "NX = " << nx << ", DIFF = " << E.getFieldRangePolicy(1).m_upper[0] - E.getFieldRangePolicy(1).m_lower[0] << std::endl;throw 5;}
-    for(size_t i = E.getFieldRangePolicy(0).m_lower[0];i < E.getFieldRangePolicy(0).m_upper[0];i++){
-        for(size_t j = E.getFieldRangePolicy(0).m_lower[1];j < E.getFieldRangePolicy(0).m_upper[1];j++){
-            for(size_t k = E.getFieldRangePolicy(0).m_lower[2];k < E.getFieldRangePolicy(0).m_upper[2];k++){
+    for(int64_t i = E.getFieldRangePolicy(0).m_lower[0];i < E.getFieldRangePolicy(0).m_upper[0];i++){
+        for(int64_t j = E.getFieldRangePolicy(0).m_lower[1];j < E.getFieldRangePolicy(0).m_upper[1];j++){
+            for(int64_t k = E.getFieldRangePolicy(0).m_lower[2];k < E.getFieldRangePolicy(0).m_upper[2];k++){
                 local_field_dump.push_back(E.getView()(i,j,k));
             }
         }
@@ -161,7 +167,7 @@ Kokkos::View<ippl::Vector<double, 3>***> collect_field_on_zero(ippl::Field<ippl:
     MPI_Gather(&local_field_size, 1, MPI_UNSIGNED_LONG, field_sizes.data(), 1, MPI_UNSIGNED_LONG, 0, ippl::Comm->getCommunicator());
     MPI_Gather(&lindex, sizeof(ippl::NDIndex<3U>), MPI_UNSIGNED_CHAR, field_regions.data(), sizeof(ippl::NDIndex<3U>), MPI_UNSIGNED_CHAR, 0, ippl::Comm->getCommunicator());
     size_t total_field_size_on_rank_0 = 0;
-    std::vector<ippl::Vector<double, 3>> complete_field_collection;
+    std::vector<ippl::Vector<scalar, 3>> complete_field_collection;
     int* rcnts = new int[ippl::Comm->size()];
     int* displs = new int[ippl::Comm->size()];
     size_t displ = 0;
@@ -177,19 +183,19 @@ Kokkos::View<ippl::Vector<double, 3>***> collect_field_on_zero(ippl::Field<ippl:
     }
     
     //std::cerr << ippl::Comm->size() << "\n";
-    MPI_Gatherv(local_field_dump.data(), local_field_dump.size() * 3, MPI_DOUBLE, complete_field_collection.data(), rcnts, displs, MPI_DOUBLE, 0, ippl::Comm->getCommunicator());
-    Kokkos::View<ippl::Vector<double, 3>***> rank0collect;
+    MPI_Gatherv(local_field_dump.data(), local_field_dump.size() * 3, std::is_same_v<std::remove_all_extents_t<scalar>, double> ? MPI_DOUBLE : MPI_FLOAT, complete_field_collection.data(), rcnts, displs, std::is_same_v<std::remove_all_extents_t<scalar>, double> ? MPI_DOUBLE : MPI_FLOAT, 0, ippl::Comm->getCommunicator());
+    Kokkos::View<ippl::Vector<scalar, 3>***> rank0collect;
     if(ippl::Comm->rank() == 0){
-        rank0collect = Kokkos::View<ippl::Vector<double, 3>***>("", nx, ny, nz);
+        rank0collect = Kokkos::View<ippl::Vector<scalar, 3>***>("", nx, ny, nz);
         for(int i = 0;i < ippl::Comm->size();i++){
-            std::vector<ippl::Vector<double, 3>> rebuild(complete_field_collection.begin() + displs[i] / 3, complete_field_collection.begin() + displs[i] / 3 + rcnts[i] / 3);
-            Kokkos::View<ippl::Vector<double, 3>*>::host_mirror_type hmirror("", rebuild.size());
-            Kokkos::View<ippl::Vector<double, 3>*> rebuild_view("", rebuild.size());
+            std::vector<ippl::Vector<scalar, 3>> rebuild(complete_field_collection.begin() + displs[i] / 3, complete_field_collection.begin() + displs[i] / 3 + rcnts[i] / 3);
+            typename Kokkos::View<ippl::Vector<scalar, 3>*>::host_mirror_type hmirror("", rebuild.size());
+            Kokkos::View<ippl::Vector<scalar, 3>*> rebuild_view("", rebuild.size());
             for(size_t ih = 0;ih < rebuild.size();ih++){
                 hmirror(ih) = rebuild[ih];
             }
             Kokkos::deep_copy(rebuild_view, hmirror);
-            Kokkos::View<ippl::Vector<double, 3>***> viu("",
+            Kokkos::View<ippl::Vector<scalar, 3>***> viu("",
                 1 + field_regions[i][0].last() - field_regions[i][0].first(),
                 1 + field_regions[i][1].last() - field_regions[i][1].first(),
                 1 + field_regions[i][2].last() - field_regions[i][2].first()
@@ -284,12 +290,13 @@ Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_val
     return ret;
 
 }
-void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
-                         ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
-             int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
+template<typename scalar>
+void dumpVTK(const typename ippl::FDTDSolver<scalar, 3>::bunch_type& pbunch, ippl::Field<ippl::Vector<scalar, 3>, 3, ippl::UniformCartesian<scalar, 3>,
+                        typename ippl::UniformCartesian<scalar, 3>::DefaultCentering>& E,
+             int nx, int ny, int nz, int iteration, scalar dx, scalar dy, scalar dz) {
 
-    Kokkos::View<ippl::Vector<double, 3U> ***> collected_view;
-    Kokkos::View<ippl::Vector<double, 3>*> pbunchgview;
+    Kokkos::View<ippl::Vector<scalar, 3U> ***> collected_view;
+    Kokkos::View<ippl::Vector<scalar, 3>*> pbunchgview;
         
     if(ippl::Comm->size() > 1){
         collected_view = collect_field_on_zero(E, nx, ny, nz);
@@ -297,7 +304,7 @@ void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ipp
     }
     else{
         pbunchgview = pbunch.R.getView();
-        collected_view = Kokkos::View<ippl::Vector<double, 3U> ***>("", nx, ny, nz);
+        collected_view = Kokkos::View<ippl::Vector<scalar, 3U> ***>("", nx, ny, nz);
         auto eview = E.getView();
         Kokkos::parallel_for(ippl::getRangePolicy(E.getView(), 1), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
             collected_view(i-1,j-1,k-1) = eview(i,j,k);
@@ -306,9 +313,9 @@ void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ipp
     }
     if(ippl::Comm->rank())return;
     //std::cout << "Extents: " << collected_view.extent(0) << ", " << collected_view.extent(1) << ", " << collected_view.extent(2) << std::endl;
-    using Mesh_t      = ippl::UniformCartesian<double, 3>;
+    using Mesh_t      = ippl::UniformCartesian<scalar, 3>;
     using Centering_t = Mesh_t::DefaultCentering;
-    typedef ippl::Field<ippl::Vector<double, 3>, 3, Mesh_t, Centering_t> VField_t;
+    typedef ippl::Field<ippl::Vector<scalar, 3>, 3, Mesh_t, Centering_t> VField_t;
     typename VField_t::view_type::host_mirror_type host_view = E.getHostMirror();
 
     std::stringstream fname;
@@ -352,13 +359,13 @@ void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ipp
         vtkout << pbunchgview(z)[0] << " " << pbunchgview(z)[1] << " " << pbunchgview(z)[2] << "\n";
     }
 }
-
-void dumpVTK(ippl::Field<double, 3, ippl::UniformCartesian<double, 3>,
-                         ippl::UniformCartesian<double, 3>::DefaultCentering>& rho,
-             int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
-    using Mesh_t      = ippl::UniformCartesian<double, 3>;
+template<typename scalar>
+void dumpVTK(ippl::Field<scalar, 3, ippl::UniformCartesian<scalar, 3>,
+                         typename ippl::UniformCartesian<scalar, 3>::DefaultCentering>& rho,
+             int nx, int ny, int nz, int iteration, scalar dx, scalar dy, scalar dz) {
+    using Mesh_t      = ippl::UniformCartesian<scalar, 3>;
     using Centering_t = Mesh_t::DefaultCentering;
-    typedef ippl::Field<double, 3, Mesh_t, Centering_t> Field_t;
+    typedef ippl::Field<scalar, 3, Mesh_t, Centering_t> Field_t;
     typename Field_t::view_type::host_mirror_type host_view = rho.getHostMirror();
 
     std::stringstream fname;
@@ -367,7 +374,7 @@ void dumpVTK(ippl::Field<double, 3, ippl::UniformCartesian<double, 3>,
     fname << ".vtk";
 
     Kokkos::deep_copy(host_view, rho.getView());
-    Kokkos::View<double***> sv = Kokkos::subview(host_view, Kokkos::make_pair(3,5), Kokkos::make_pair(3,5), Kokkos::make_pair(3,5));
+    Kokkos::View<scalar***> sv = Kokkos::subview(host_view, Kokkos::make_pair(3,5), Kokkos::make_pair(3,5), Kokkos::make_pair(3,5));
     //Kokkos::subview()
     std::ofstream vtkout(fname.str());
     constexpr char endl = '\n';
@@ -406,17 +413,17 @@ int main(int argc, char* argv[]) {
 
         // get the gridsize from the user
         ippl::Vector<int, Dim> nr = {std::atoi(argv[1]), std::atoi(argv[2]), std::atoi(argv[3])};
-
+        using scalar = float;
         // get the total simulation time from the user
-        const double time_simulated = std::atof(argv[4]);
+        const scalar time_simulated = std::atof(argv[4]);
         if(time_simulated <= 0){
             std::cerr << "Time must be > 0\n";
             goto exit;
         }
-        using Mesh_t      = ippl::UniformCartesian<double, Dim>;
+        using Mesh_t      = ippl::UniformCartesian<scalar, Dim>;
         using Centering_t = Mesh_t::DefaultCentering;
-        typedef ippl::Field<double, Dim, Mesh_t, Centering_t> Field_t;
-        typedef ippl::Field<ippl::Vector<double, Dim>, Dim, Mesh_t, Centering_t> VField_t;
+        typedef ippl::Field<scalar, Dim, Mesh_t, Centering_t> Field_t;
+        typedef ippl::Field<ippl::Vector<scalar, Dim>, Dim, Mesh_t, Centering_t> VField_t;
 
         // domain
         ippl::NDIndex<Dim> owned;
@@ -431,20 +438,20 @@ int main(int argc, char* argv[]) {
         }
 
         // unit box
-        double dx                        = 1.0 / nr[0];
-        double dy                        = 1.0 / nr[1];
-        double dz                        = 1.0 / nr[2];
-        ippl::Vector<double, Dim> hr     = {dx, dy, dz};
-        ippl::Vector<double, Dim> origin = {0.0, 0.0, 0.0};
+        scalar dx                        = scalar(1.0) / nr[0];
+        scalar dy                        = scalar(1.0) / nr[1];
+        scalar dz                        = scalar(1.0) / nr[2];
+        ippl::Vector<scalar, Dim> hr     = {dx, dy, dz};
+        ippl::Vector<scalar, Dim> origin = {0.0, 0.0, 0.0};
         Mesh_t mesh(owned, hr, origin);
         
         // CFL condition lambda = c*dt/h < 1/sqrt(d) = 0.57 for d = 3
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
-        const double c = 1.0;  // 299792458.0;
-        double dt      = std::min({dx, dy, dz}) * 0.125 / c;
+        const scalar c = 1.0;  // 299792458.0;
+        scalar dt      = std::min({dx, dy, dz}) * 0.125 / c;
         unsigned int iterations = std::ceil(time_simulated / dt);
-        dt = time_simulated / (double)iterations;
+        dt = time_simulated / (scalar)iterations;
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
         if(false){
@@ -453,7 +460,7 @@ int main(int argc, char* argv[]) {
             halo_test_field.initialize(mesh, layout);
 
             auto _tv = halo_test_field.getView();   
-            const double ronk = ippl::Comm->rank();
+            const scalar ronk = ippl::Comm->rank();
             Kokkos::parallel_for(halo_test_field.getFieldRangePolicy(), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
                 _tv(i, j, k) = ronk;
             });
@@ -505,7 +512,7 @@ int main(int argc, char* argv[]) {
         bool seed = false;
 
         // define an FDTDSolver object
-        ippl::FDTDSolver<double, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, seed);
+        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, seed);
         
         //if(!ippl::Comm->rank()){
         //    std::cout << solver.aN_m.getLayout().getDomain().last() << "\n";
@@ -543,8 +550,8 @@ int main(int argc, char* argv[]) {
             auto view_an1    = solver.aNm1_m.getView();
             if(false)
             solver.fill_initialcondition(
-                KOKKOS_LAMBDA([[maybe_unused]] double x, [[maybe_unused]] double y, [[maybe_unused]] double z) {
-                    ippl::Vector<double, 3> ret(0.0);
+                KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
+                    ippl::Vector<scalar, 3> ret(0.0);
                     ret[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y, 0.2, 0.05);
                     //(void)x;
                     //(void)y;
@@ -591,7 +598,7 @@ int main(int argc, char* argv[]) {
             //Kokkos::View<double***> energy_density("Energies", view_a.extent(0), view_a.extent(1),
             //                                   view_a.extent(2));
         
-            double error_accumulation = 0.0;
+            scalar error_accumulation = 0.0;
             //const double volume = (1.0 / (nr[0] - 6)) * (1.0 / (nr[1] - 6)) * (1.0 / (nr[2] - 6));
             /*Kokkos::parallel_reduce(
                 "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, 3),
@@ -619,7 +626,7 @@ int main(int argc, char* argv[]) {
                         //view_rho(i, j, k) = sine(0, dt);
                     //}
             }, error_accumulation);*/
-            error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, double x, double y, double z){
+            error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z){
                 return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
                 (void)i;(void)x;
                 (void)j;(void)y;

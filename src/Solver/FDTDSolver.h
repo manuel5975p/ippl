@@ -26,8 +26,9 @@
 
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
-template <class PLayout>
+template <typename _scalar, class PLayout>
 struct Bunch : public ippl::ParticleBase<PLayout> {
+    using scalar = _scalar;
     Bunch(PLayout& playout)
         : ippl::ParticleBase<PLayout>(playout) {
         this->addAttribute(Q);
@@ -39,9 +40,9 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
 
     ~Bunch() {}
     
-    using charge_container_type   = ippl::ParticleAttrib             <double    >;
-    using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
-    using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<double, 3>>;
+    using charge_container_type   = ippl::ParticleAttrib             <scalar    >;
+    using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
+    using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
     charge_container_type Q;
     velocity_container_type gamma_beta;
     typename ippl::ParticleBase<PLayout>::particle_position_type R_np1;
@@ -49,9 +50,10 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     vector_container_type B_gather;
 };
 namespace ippl {
-    template <typename Tfields, unsigned Dim, class M = UniformCartesian<double, Dim>,
+    template <typename Tfields, unsigned Dim, class M = UniformCartesian<Tfields, Dim>,
               class C = typename M::DefaultCentering>
     class FDTDSolver {
+        using scalar = Tfields;
     public:
         // define a type for scalar field (e.g. charge density field)
         // define a type for vectors
@@ -71,17 +73,17 @@ namespace ippl {
 
         // constructor and destructor
         FDTDSolver(Field_t* charge, VField_t* current, VField_t* E, VField_t* B,
-                   double timestep = 0.05, bool seed_ = false);
+                   scalar timestep = 0.05, bool seed_ = false);
         ~FDTDSolver();
 
         // finite differences time domain solver for potentials (A and phi)
         void solve();
 
         // evaluates E and B fields using computed potentials
-        double field_evaluation();
+        scalar field_evaluation();
 
         // gaussian pulse
-        double gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
+        KOKKOS_FUNCTION scalar gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
 
         // initialization of FDTD solver
         void initialize();
@@ -104,7 +106,7 @@ namespace ippl {
         Vector<int, Dim> nr_m;
 
         // size of timestep
-        double dt;
+        scalar dt;
 
         // seed flag
         bool seed;
@@ -127,14 +129,14 @@ namespace ippl {
         // E and B fields
         VField_t* En_mp;
         VField_t* Bn_mp;
-        double total_energy;
-        using accumulation_type = double;
+        scalar total_energy;
+        using accumulation_type = scalar;
         accumulation_type absorbed__energy;
 
-        using playout_type = ippl::ParticleSpatialLayout<double, 3>;
-        using bunch_type = ::Bunch<playout_type>;
+        using playout_type = ippl::ParticleSpatialLayout<scalar, 3>;
+        using bunch_type = ::Bunch<scalar, playout_type>;
         playout_type pl;
-        ::Bunch<ippl::ParticleSpatialLayout<double, 3>> bunch;
+        ::Bunch<scalar, ippl::ParticleSpatialLayout<scalar, 3>> bunch;
         size_t particle_count;
 
         // buffer for communication

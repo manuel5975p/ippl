@@ -173,13 +173,13 @@ namespace ippl {
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             Vector<T, Dim> from, Vector<T, Dim> to,
-            const Vector<T, Dim>& hr, T scale, const NDIndex<Dim> lDom, int nghost) {
+            const Vector<T, Dim>& hr, T scale, const NDIndex<Dim> lDom, [[maybe_unused]] int nghost) {
             
             // Define utility functions
             using Kokkos::floor;
             using Kokkos::max;
             using Kokkos::min;
-            constexpr auto fractional_part = KOKKOS_LAMBDA(double x) {
+            auto fractional_part = KOKKOS_LAMBDA(T x) {
                 return x - floor(x); // Return the fractional part of x value between 0 and 1
             };
             Vector<T, Dim> from_in_grid_coordinates;
@@ -187,8 +187,8 @@ namespace ippl {
             // Calculate the indices for the scatter operation
             ippl::Vector<IndexType, Dim> fromi, toi;
             for (unsigned int i = 0; i < Dim; i++) {
-                from[i] += hr[i] * 0.5;
-                to[i] += hr[i] * 0.5;
+                from[i] += hr[i] * T(0.5);
+                to[i] += hr[i] * T(0.5);
                 from_in_grid_coordinates[i] = from[i] / hr[i];
                 to_in_grid_coordinates  [i] = to[i] / hr[i];
                 fromi[i] = Kokkos::floor(from_in_grid_coordinates[i]);
@@ -205,7 +205,7 @@ namespace ippl {
                     min(fromi[i], toi[i]) * hr[i] + hr[i],
                     max(
                         max(fromi[i], toi[i]) * hr[i],
-                        0.5 * (to[i] + from[i])
+                        T(0.5) * (to[i] + from[i])
                     )
                 );
             }
@@ -228,8 +228,8 @@ namespace ippl {
 
             // Perform the scatter operation for each scatter point
             for(unsigned i = 0;i < Dim;i++){
-                assert(fromi_local[i] < view.extent(i));
-                assert(toi_local[i] < view.extent(i));
+                //assert(fromi_local[i] < view.extent(i));
+                //assert(toi_local[i] < view.extent(i));
             }
             //return;
             [[maybe_unused]] auto _ =

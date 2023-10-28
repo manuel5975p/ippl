@@ -192,8 +192,8 @@ namespace ippl {
         using vector_type = typename mesh_type::vector_type;
         using value_type  = typename ParticleAttrib<T, Properties...>::value_type;
 
-        const vector_type& dx     = mesh.getMeshSpacing();
-        const vector_type& origin = mesh.getOrigin();
+        const vector_type dx     = mesh.getMeshSpacing();
+        const vector_type origin = mesh.getOrigin();
         const vector_type invdx   = 1.0 / dx;
 
         const FieldLayout<Dim>& layout = f.getLayout();
