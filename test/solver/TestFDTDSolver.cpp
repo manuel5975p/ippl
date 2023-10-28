@@ -237,15 +237,66 @@ Kokkos::View<ippl::Vector<double, 3>***> collect_field_on_zero(ippl::Field<ippl:
     
     return rank0collect;
 }
+
+template<typename view_value_type>
+Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_value_type*> src_view, size_t locsize){
+    //return Kokkos::View<view_value_type*>("", 0);
+    size_t local_field_size = locsize;
+    std::vector<size_t> field_sizes(ippl::Comm->size(), 0);
+
+    //std::cout << "pg" << std::endl;// Gather the counts of data from all processes to the root
+    MPI_Gather(&local_field_size, 1, MPI_UNSIGNED_LONG, field_sizes.data(), 1, MPI_UNSIGNED_LONG, 0, ippl::Comm->getCommunicator());
+    if(!ippl::Comm->rank()){
+        size_t ts = 0;
+        for(auto fs : field_sizes)ts += fs;
+        std::cout << "Total: " << ts << "\n";
+    }
+    //std::cout << "ag" << std::endl;
+    typename Kokkos::View<view_value_type*>::host_mirror_type hmirror = Kokkos::create_mirror_view(src_view);
+    std::vector<view_value_type> local_view_dump(local_field_size);
+    for(size_t i = 0;i < local_field_size;i++){
+        local_view_dump[i] = hmirror[i];
+    }
+    std::vector<int> rcnts(ippl::Comm->size());
+    std::vector<int> displs(ippl::Comm->size());
+    std::vector<view_value_type> complete_field_collection;
+    size_t total_field_size_on_rank_0 = 0;
+    if(ippl::Comm->rank() == 0){
+        int displ = 0;
+        for(size_t i = 0;i < field_sizes.size();i++){
+            total_field_size_on_rank_0 += field_sizes[i];
+            displs[i] = displ;
+            rcnts[i] = field_sizes[i] * sizeof(view_value_type);
+            displ += field_sizes[i] * sizeof(view_value_type);
+        }
+            
+        complete_field_collection.resize(total_field_size_on_rank_0);
+    }
+    MPI_Gatherv(local_view_dump.data(), local_view_dump.size() * sizeof(view_value_type), MPI_CHAR, complete_field_collection.data(), rcnts.data(), displs.data(), MPI_CHAR, 0, ippl::Comm->getCommunicator());
+    Kokkos::View<view_value_type*> ret("", complete_field_collection.size());
+    typename Kokkos::View<view_value_type*>::host_mirror_type ret_hmirror("", complete_field_collection.size());
+    if(ippl::Comm->rank() == 0){
+        for(size_t i = 0;i < complete_field_collection.size();i++){
+            ret_hmirror(i) = complete_field_collection[i];
+        }
+        Kokkos::deep_copy(ret, ret_hmirror);
+    }
+    return ret;
+
+}
 void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
                          ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
              int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
 
     Kokkos::View<ippl::Vector<double, 3U> ***> collected_view;
+    Kokkos::View<ippl::Vector<double, 3>*> pbunchgview;
+        
     if(ippl::Comm->size() > 1){
         collected_view = collect_field_on_zero(E, nx, ny, nz);
+        pbunchgview = collect_linear_view_on_zero(pbunch.R.getView(), pbunch.getLocalNum());
     }
     else{
+        pbunchgview = pbunch.R.getView();
         collected_view = Kokkos::View<ippl::Vector<double, 3U> ***>("", nx, ny, nz);
         auto eview = E.getView();
         Kokkos::parallel_for(ippl::getRangePolicy(E.getView(), 1), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
@@ -269,8 +320,8 @@ void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ipp
     Kokkos::deep_copy(host_view, E.getView());
 
     std::ofstream vtkout(fname.str());
-    vtkout.precision(10);
-    vtkout.setf(std::ios::scientific, std::ios::floatfield);
+    vtkout.precision(4);
+    //vtkout.setf(std::ios::scientific, std::ios::floatfield);
 
     // start with header
     vtkout << "# vtk DataFile Version 2.0" << endl;
@@ -297,8 +348,8 @@ void dumpVTK(const typename ippl::FDTDSolver<double, 3>::bunch_type& pbunch, ipp
     }
     
     vtkout << "----\n";
-    for (size_t z = 0; z < pbunch.getLocalNum();z++) {
-        vtkout << pbunch.R.getView()(z)[0] << " " << pbunch.R.getView()(z)[1] << " " << pbunch.R.getView()(z)[2] << "\n";
+    for (size_t z = 0; z < pbunchgview.extent(0);z++) {
+        vtkout << pbunchgview(z)[0] << " " << pbunchgview(z)[1] << " " << pbunchgview(z)[2] << "\n";
     }
 }
 
@@ -490,7 +541,7 @@ int main(int argc, char* argv[]) {
             //auto ldom        = layout.getLocalNDIndex();
             auto view_a      = solver.aN_m.getView();
             auto view_an1    = solver.aNm1_m.getView();
-            //if(false)
+            if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA([[maybe_unused]] double x, [[maybe_unused]] double y, [[maybe_unused]] double z) {
                     ippl::Vector<double, 3> ret(0.0);
@@ -518,12 +569,14 @@ int main(int argc, char* argv[]) {
             }
 
             solver.solve();
-            dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            //
+            
+            //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //if(it == iterations / 2){
             //    dumpPOV(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //}
         }
-
+        //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], iterations + 1, hr[0], hr[1], hr[2]);
         if (!seed) {
             // add pulse at center of domain
             

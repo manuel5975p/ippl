@@ -194,8 +194,8 @@ namespace ippl {
                 fromi[i] = Kokkos::floor(from_in_grid_coordinates[i]);
                 toi[i]   = Kokkos::floor(to_in_grid_coordinates[i]);
             }
-            fromi = fromi - lDom.first();
-            toi = toi - lDom.first();
+            ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
+            ippl::Vector<IndexType, Dim> toi_local = toi - lDom.first();
 
             // Calculate the relay point for each dimension
             ippl::Vector<T, Dim> relay;
@@ -209,6 +209,7 @@ namespace ippl {
                     )
                 );
             }
+            ippl::Vector<T, Dim> relay_local = relay - lDom.first();
 
             // Calculate jcfrom and jcto
             ippl::Vector<T, Dim> jcfrom, jcto;
@@ -216,7 +217,8 @@ namespace ippl {
             jcfrom -= from;
             jcto = to;
             jcto -= relay;
-            //std::cout << frommin(fromi[i], toi[i]) * hr[i] + hr[i] << "   \t" << fromi[1] * hr[1] << "\n";
+            //std::cout << ippl::Comm->rank() << jcfrom << "   \t" << jcto << "\n";
+            //std::cout << lDom.first() << "  ldf\n";
             // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;
             for (unsigned i = 0; i < Dim; i++) {
@@ -225,12 +227,14 @@ namespace ippl {
             }
 
             // Perform the scatter operation for each scatter point
-            if(!ippl::Comm->rank())
-                std::cout << "Deponiere zu " << fromi << " und " << toi << "\n";
+            for(unsigned i = 0;i < Dim;i++){
+                assert(fromi_local[i] < view.extent(i));
+                assert(toi_local[i] < view.extent(i));
+            }
             //return;
             [[maybe_unused]] auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
-                                                     whi, fromi, jcfrom, scale)
+                                                     whi, fromi_local, jcfrom, scale)
                  ^ ...);
             for (unsigned i = 0; i < Dim; i++) {
                 wlo[i] = 1.0 - fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
@@ -238,7 +242,7 @@ namespace ippl {
             }
             [[maybe_unused]] auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
-                                                     whi, toi, jcto, scale)
+                                                     whi, toi_local, jcto, scale)
                  ^ ...);
         }
     }  // namespace detail

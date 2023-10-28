@@ -684,7 +684,7 @@ namespace ippl {
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
         //for(size_t i = 0;i < JN_mp->getView().extent(1);i++)
         //    JN_mp->getView()(20, i, 20) = ippl::Vector<double, 3>{0,1,0};
-        //bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
+        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
         
         //bunch.layout_m->update();
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
@@ -922,12 +922,12 @@ namespace ippl {
         constexpr double c        = 1.0;  // 299792458.0;
         constexpr double mu0      = 1.0;  // 1.25663706212e-6;
         constexpr double epsilon0 = 1.0 / (c * c * mu0);
-        constexpr double electron_charge = -0.30282212088;
-        bunch.create(particle_count);
+        constexpr double electron_charge = 0.30282212088;
+        bunch.create(!!!ippl::Comm->rank());
         bunch.Q = electron_charge;
         bunch.R = ippl::Vector<double, 3>(0.4);
         bunch.gamma_beta = ippl::Vector<double, 3>{0.0, 1e6, 0.0};
-        bunch.R_np1 = ippl::Vector<double, 3>(0.5);
+        bunch.R_np1 = ippl::Vector<double, 3>(0.4);
         // get layout and mesh
         layout_mp = &(this->rhoN_mp->getLayout());
         mesh_mp   = &(this->rhoN_mp->get_mesh());
