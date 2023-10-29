@@ -168,20 +168,24 @@ namespace ippl {
          * @param hr The grid spacing.
          * @param scale The scaling factor to apply during the scatter operation. This is usually set to the inverse of the timestep.
          */
+        template<typename T>
+        T fractional_part(T x){
+            using Kokkos::floor;
+            return x - floor(x);
+        }
         template <unsigned long... ScatterPoint, typename T, unsigned Dim, typename IndexType>
-        KOKKOS_INLINE_FUNCTION constexpr void zigzag_scatterToField(
+        KOKKOS_INLINE_FUNCTION void zigzag_scatterToField(
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             Vector<T, Dim> from, Vector<T, Dim> to,
-            const Vector<T, Dim>& hr, T scale, const NDIndex<Dim> lDom, [[maybe_unused]] int nghost) {
+            const Vector<T, Dim> hr, T scale, const NDIndex<Dim> lDom, int nghost) {
             
             // Define utility functions
-            using Kokkos::floor;
+            (void)nghost;
+
+            
             using Kokkos::max;
             using Kokkos::min;
-            auto fractional_part = KOKKOS_LAMBDA(T x) {
-                return x - floor(x); // Return the fractional part of x value between 0 and 1
-            };
             Vector<T, Dim> from_in_grid_coordinates;
             Vector<T, Dim> to_in_grid_coordinates;
             // Calculate the indices for the scatter operation
@@ -232,7 +236,7 @@ namespace ippl {
                 //assert(toi_local[i] < view.extent(i));
             }
             //return;
-            [[maybe_unused]] auto _ =
+            auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, fromi_local, jcfrom, scale)
                  ^ ...);
@@ -240,10 +244,13 @@ namespace ippl {
                 wlo[i] = 1.0 - fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
                 whi[i] = fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
             }
-            [[maybe_unused]] auto __ =
+            auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, toi_local, jcto, scale)
                  ^ ...);
+
+            (void)_;
+            (void)__;
         }
     }  // namespace detail
 }  // namespace ippl

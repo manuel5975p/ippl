@@ -88,10 +88,10 @@ namespace ippl {
         // initialization of FDTD solver
         void initialize();
 
-        
-        void fill_initialcondition(auto c);
-
-        Tfields volumetric_integral(auto c);
+        template<typename callable>
+        void fill_initialcondition(callable c);
+        template<typename callable>
+        Tfields volumetric_integral(callable c);
 
     public:
         // mesh and layout objects

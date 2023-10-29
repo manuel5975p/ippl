@@ -161,11 +161,11 @@ namespace ippl {
          */
         template <unsigned long... ScatterPoint, typename T, unsigned Dim,
                   typename IndexType = size_t>
-        KOKKOS_INLINE_FUNCTION constexpr void zigzag_scatterToField(
+        KOKKOS_INLINE_FUNCTION void zigzag_scatterToField(
             const std::index_sequence<ScatterPoint...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             Vector<T, Dim> from, Vector<T, Dim> to,
-            const Vector<T, Dim>& hr /*Grid Spacing*/, T scale, NDIndex<Dim> lDom, int nghost);
+            const Vector<T, Dim> hr /*Grid Spacing*/, T scale, NDIndex<Dim> lDom, int nghost);
     }  // namespace detail
 }  // namespace ippl
 

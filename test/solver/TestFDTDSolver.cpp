@@ -45,12 +45,15 @@ KOKKOS_INLINE_FUNCTION auto sine(T n, R dt) {
     using Kokkos::sin;
     return 100.0 * sin(n * dt);
 }
-KOKKOS_INLINE_FUNCTION auto gauss(double x, double mean, double stddev) {
+template<typename T1, typename T2, typename T3>
+KOKKOS_INLINE_FUNCTION auto gauss(T1 x, T2 mean, T3 stddev) {
     (void)x;
     (void)mean;
     (void)stddev;
+    using Kokkos::exp;
+    using Kokkos::sin;
     //return std::sin(x * M_PI * 2.0 * 1.0);
-    return std::exp(-(x - mean) * (x - mean) / (stddev * stddev));
+    return exp(-(x - mean) * (x - mean) / (stddev * stddev));
     //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
     //return 100.0 * (std::max(0.0, 1.0 - std::abs(x - mean) / stddev));
 }

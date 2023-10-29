@@ -234,7 +234,7 @@ KOKKOS_INLINE_FUNCTION std::array<axis_aligned_occlusion, sizeof...(extent_types
     const std::tuple<extent_types...>& _extents) {
     constexpr size_t Dim = std::tuple_size_v<std::tuple<extent_types...>>;
 
-    constexpr auto get_array = [](auto&&... x) {
+    constexpr auto get_array = []<typename... Ts>(Ts&&... x) {
         return std::array<size_t, sizeof...(x)>{static_cast<size_t>(x)...};
     };
 
@@ -686,7 +686,7 @@ namespace ippl {
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
         //for(size_t i = 0;i < JN_mp->getView().extent(1);i++)
         //    JN_mp->getView()(20, i, 20) = ippl::Vector<scalar, 3>{0,1,0};
-        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, 1.0 / dt);
+        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, scalar(1.0) / dt);
         
         //bunch.layout_m->update();
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
@@ -959,7 +959,8 @@ namespace ippl {
         aNp1_m = 0.0;
     };
     template<typename Tfields, unsigned Dim, class M, class C>
-    void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(auto c){
+    template<typename callable>
+    void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(callable c){
         auto view_a      = aN_m.getView();
         auto view_an1    = aNm1_m.getView();
         auto ldom = layout_mp->getLocalNDIndex();
@@ -980,7 +981,8 @@ namespace ippl {
         );
     }
     template<typename Tfields, unsigned Dim, class M, class C>
-    Tfields FDTDSolver<Tfields, Dim, M, C>::volumetric_integral(auto c){
+    template<typename callable>
+    Tfields FDTDSolver<Tfields, Dim, M, C>::volumetric_integral(callable c){
         auto view_a      = aN_m.getView();
         auto view_an1    = aNm1_m.getView();
         auto ldom = layout_mp->getLocalNDIndex();
