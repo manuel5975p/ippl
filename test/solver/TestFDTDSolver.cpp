@@ -27,7 +27,27 @@
 // You should have received a copy of the GNU General Public License
 // along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
-
+#include <iostream>
+#include <quadmath.h>
+#define gqf(X) __float128 X(__float128 x)noexcept{ \
+    return X##q(x);\
+}
+namespace Kokkos{
+gqf(sqrt);
+gqf(sin);
+gqf(floor);
+gqf(cos);
+gqf(exp);
+__float128 max(__float128 x, __float128 y)noexcept{ 
+    return fmaxq(x, y);
+}
+__float128 min(__float128 x, __float128 y)noexcept{ 
+    return fminq(x, y);
+}
+}
+std::ostream& operator<<(std::ostream& ostr, __float128 x){
+    return ostr << (double)x;
+}
 #include "Ippl.h"
 
 #include <cstdlib>
@@ -51,15 +71,25 @@ KOKKOS_INLINE_FUNCTION auto gauss(T1 x, T2 mean, T3 stddev) {
     (void)mean;
     (void)stddev;
     using Kokkos::exp;
-    using Kokkos::sin;
-    //return std::sin(x * M_PI * 2.0 * 1.0);
     return exp(-(x - mean) * (x - mean) / (stddev * stddev));
-    //return (1.0 + x - mean) * 100.0 * std::exp(-(x - mean) * (x - mean) / (stddev * stddev)) * x;
-    //return 100.0 * (std::max(0.0, 1.0 - std::abs(x - mean) / stddev));
+}
+
+template<typename T1, unsigned Dim, typename T2, typename T3>
+KOKKOS_INLINE_FUNCTION auto gauss(ippl::Vector<T1, Dim> x, T2 mean, T3 stddev) {
+    (void)x;
+    (void)mean;
+    (void)stddev;
+    using Kokkos::exp;
+    T1 accum = 0.0;
+    for(unsigned i = 0;i < Dim;i++){
+        accum += (x[i] - mean) * (x[i] - mean);
+    }
+    return exp(-accum / (stddev * stddev));
 }
 template<typename T, unsigned Dim>
 std::string povstring(const ippl::Vector<T, Dim>& v){
     std::stringstream sstr;
+    sstr.precision(4);
     sstr << '<';
     for(size_t i = 0;i < Dim;i++){
         sstr << v[i];
@@ -148,7 +178,9 @@ Kokkos::View<ippl::Vector<scalar, 3>***> collect_field_on_zero(ippl::Field<ippl:
     //    volume *= (lindex[i].last() - lindex[i].first());
     //}
     std::vector<ippl::Vector<scalar, 3>> local_field_dump;
-
+    Kokkos::View<ippl::Vector<scalar, 3>***> Eview = E.getView();
+    typename Kokkos::View<ippl::Vector<scalar, 3>***>::host_mirror_type Eview_hmirror = Kokkos::create_mirror_view(Eview);
+    Kokkos::deep_copy(Eview_hmirror, Eview);
     //int lindex_xextent = lindex[0].last() - lindex[0].first() + 1;
     //if(lindex_xextent != E.getFieldRangePolicy(1).m_upper[0] - E.getFieldRangePolicy(1).m_lower[0]){
     //    std::cout << lindex_xextent << " " << E.getFieldRangePolicy(0).m_upper[0] - E.getFieldRangePolicy(0).m_lower[0] << std::endl;
@@ -158,7 +190,7 @@ Kokkos::View<ippl::Vector<scalar, 3>***> collect_field_on_zero(ippl::Field<ippl:
     for(int64_t i = E.getFieldRangePolicy(0).m_lower[0];i < E.getFieldRangePolicy(0).m_upper[0];i++){
         for(int64_t j = E.getFieldRangePolicy(0).m_lower[1];j < E.getFieldRangePolicy(0).m_upper[1];j++){
             for(int64_t k = E.getFieldRangePolicy(0).m_lower[2];k < E.getFieldRangePolicy(0).m_upper[2];k++){
-                local_field_dump.push_back(E.getView()(i,j,k));
+                local_field_dump.push_back(Eview_hmirror(i,j,k));
             }
         }
     }
@@ -171,8 +203,10 @@ Kokkos::View<ippl::Vector<scalar, 3>***> collect_field_on_zero(ippl::Field<ippl:
     MPI_Gather(&lindex, sizeof(ippl::NDIndex<3U>), MPI_UNSIGNED_CHAR, field_regions.data(), sizeof(ippl::NDIndex<3U>), MPI_UNSIGNED_CHAR, 0, ippl::Comm->getCommunicator());
     size_t total_field_size_on_rank_0 = 0;
     std::vector<ippl::Vector<scalar, 3>> complete_field_collection;
-    int* rcnts = new int[ippl::Comm->size()];
-    int* displs = new int[ippl::Comm->size()];
+    
+    std::vector<int> rcnts(ippl::Comm->size());
+    std::vector<int> displs(ippl::Comm->size());
+
     size_t displ = 0;
     if(ippl::Comm->rank() == 0){
         for(size_t i = 0;i < field_sizes.size();i++){
@@ -186,7 +220,7 @@ Kokkos::View<ippl::Vector<scalar, 3>***> collect_field_on_zero(ippl::Field<ippl:
     }
     
     //std::cerr << ippl::Comm->size() << "\n";
-    MPI_Gatherv(local_field_dump.data(), local_field_dump.size() * 3, std::is_same_v<std::remove_all_extents_t<scalar>, double> ? MPI_DOUBLE : MPI_FLOAT, complete_field_collection.data(), rcnts, displs, std::is_same_v<std::remove_all_extents_t<scalar>, double> ? MPI_DOUBLE : MPI_FLOAT, 0, ippl::Comm->getCommunicator());
+    MPI_Gatherv(local_field_dump.data(), local_field_dump.size() * 3, std::is_same_v<std::remove_all_extents_t<scalar>, double> ? MPI_DOUBLE : MPI_FLOAT, complete_field_collection.data(), rcnts.data(), displs.data(), std::is_same_v<std::remove_all_extents_t<scalar>, double> ? MPI_DOUBLE : MPI_FLOAT, 0, ippl::Comm->getCommunicator());
     Kokkos::View<ippl::Vector<scalar, 3>***> rank0collect;
     if(ippl::Comm->rank() == 0){
         rank0collect = Kokkos::View<ippl::Vector<scalar, 3>***>("", nx, ny, nz);
@@ -238,8 +272,6 @@ Kokkos::View<ippl::Vector<scalar, 3>***> collect_field_on_zero(ippl::Field<ippl:
 
     }
     //std::cout << "Gathered\n";
-    delete[] rcnts;
-    delete[] displs;
     //std::stringstream sstr;
     //sstr << ippl::Comm->rank() << ": Volume = " << volume << " = " << (lindex[0].last() - lindex[0].first()) << " * " << (lindex[1].last() - lindex[1].first()) << " * " << (lindex[2].last() - lindex[2].first()) << " * " << "\n";
     //std::cout << sstr.str();
@@ -290,6 +322,7 @@ Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_val
         }
         Kokkos::deep_copy(ret, ret_hmirror);
     }
+    
     return ret;
 
 }
@@ -299,21 +332,25 @@ void dumpVTK(const typename ippl::FDTDSolver<scalar, 3>::bunch_type& pbunch, ipp
              int nx, int ny, int nz, int iteration, scalar dx, scalar dy, scalar dz) {
 
     Kokkos::View<ippl::Vector<scalar, 3U> ***> collected_view;
-    Kokkos::View<ippl::Vector<scalar, 3>*> pbunchgview;
+    Kokkos::View<ippl::Vector<scalar, 3>*> pbunch_pos_gathered;
+    Kokkos::View<ippl::Vector<scalar, 3>*> pbunch_gammabeta_gathered;
         
     if(ippl::Comm->size() > 1){
         collected_view = collect_field_on_zero(E, nx, ny, nz);
-        pbunchgview = collect_linear_view_on_zero(pbunch.R.getView(), pbunch.getLocalNum());
+        pbunch_pos_gathered = collect_linear_view_on_zero(pbunch.R.getView(), pbunch.getLocalNum());
+        pbunch_gammabeta_gathered = collect_linear_view_on_zero(pbunch.gamma_beta.getView(), pbunch.getLocalNum());
     }
     else{
-        pbunchgview = pbunch.R.getView();
+        pbunch_pos_gathered = pbunch.R.getView();
         collected_view = Kokkos::View<ippl::Vector<scalar, 3U> ***>("", nx, ny, nz);
         auto eview = E.getView();
         Kokkos::parallel_for(ippl::getRangePolicy(E.getView(), 1), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
             collected_view(i-1,j-1,k-1) = eview(i,j,k);
         });
+        
         Kokkos::fence();
     }
+    //std::cout << "Lokal: " << pbunch.getLocalNum() << "\n";
     if(ippl::Comm->rank())return;
     //std::cout << "Extents: " << collected_view.extent(0) << ", " << collected_view.extent(1) << ", " << collected_view.extent(2) << std::endl;
     using Mesh_t      = ippl::UniformCartesian<scalar, 3>;
@@ -358,8 +395,8 @@ void dumpVTK(const typename ippl::FDTDSolver<scalar, 3>::bunch_type& pbunch, ipp
     }
     
     vtkout << "----\n";
-    for (size_t z = 0; z < pbunchgview.extent(0);z++) {
-        vtkout << pbunchgview(z)[0] << " " << pbunchgview(z)[1] << " " << pbunchgview(z)[2] << "\n";
+    for (size_t z = 0; z < pbunch_pos_gathered.extent(0);z++) {
+        vtkout << pbunch_pos_gathered(z)[0] << " " << pbunch_pos_gathered(z)[1] << " " << pbunch_pos_gathered(z)[2] << "\n";
     }
 }
 template<typename scalar>
@@ -416,17 +453,21 @@ int main(int argc, char* argv[]) {
 
         // get the gridsize from the user
         ippl::Vector<int, Dim> nr = {std::atoi(argv[1]), std::atoi(argv[2]), std::atoi(argv[3])};
-        using scalar = float;
+        using scalar = double;
         // get the total simulation time from the user
         const scalar time_simulated = std::atof(argv[4]);
         if(time_simulated <= 0){
             std::cerr << "Time must be > 0\n";
             goto exit;
         }
+        
         using Mesh_t      = ippl::UniformCartesian<scalar, Dim>;
         using Centering_t = Mesh_t::DefaultCentering;
         typedef ippl::Field<scalar, Dim, Mesh_t, Centering_t> Field_t;
         typedef ippl::Field<ippl::Vector<scalar, Dim>, Dim, Mesh_t, Centering_t> VField_t;
+
+        //std::cout << std::is_conti<Field_t> << "\n";
+        //goto exit;
 
         // domain
         ippl::NDIndex<Dim> owned;
@@ -452,13 +493,13 @@ int main(int argc, char* argv[]) {
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
         const scalar c = 1.0;  // 299792458.0;
-        scalar dt      = std::min({dx, dy, dz}) * 0.125 / c;
-        unsigned int iterations = std::ceil(time_simulated / dt);
+        scalar dt      = std::min({dx, dy, dz}) * 0.25 / c;
+        unsigned int iterations = std::ceil((double)(time_simulated / dt));
         dt = time_simulated / (scalar)iterations;
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
         if(false){
-            Field_t halo_test_field;        
+            Field_t halo_test_field;
 
             halo_test_field.initialize(mesh, layout);
 
@@ -501,7 +542,8 @@ int main(int argc, char* argv[]) {
         // define current = 0
         VField_t current;
         current.initialize(mesh, layout);
-
+        VField_t radiation;
+        radiation.initialize(mesh, layout);
         
         //std::stringstream sstr;
         //sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[0].first() << " to " << current.getLayout().getLocalNDIndex()[0].last() << "\n";
@@ -515,19 +557,19 @@ int main(int argc, char* argv[]) {
         bool seed = false;
 
         // define an FDTDSolver object
-        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, seed);
+        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, &radiation,seed);
         
         //if(!ippl::Comm->rank()){
         //    std::cout << solver.aN_m.getLayout().getDomain().last() << "\n";
         //}
         //return 0;
         
-        solver.bconds[0] = ippl::MUR_ABC_1ST;
-        solver.bconds[1] = ippl::MUR_ABC_1ST;
-        solver.bconds[2] = ippl::MUR_ABC_1ST;
-        //solver.bconds[0] = ippl::PERIODIC_FACE;
-        //solver.bconds[1] = ippl::PERIODIC_FACE;
-        //solver.bconds[2] = ippl::PERIODIC_FACE;
+        //solver.bconds[0] = ippl::NO_FACE;
+        //solver.bconds[1] = ippl::NO_FACE;
+        //solver.bconds[2] = ippl::NO_FACE;
+        solver.bconds[0] = ippl::PERIODIC_FACE;
+        solver.bconds[1] = ippl::PERIODIC_FACE;
+        solver.bconds[2] = ippl::PERIODIC_FACE;
         decltype(solver)::bunch_type bunch_buffer(solver.pl);
         solver.pl.update(solver.bunch, bunch_buffer);
 
@@ -551,11 +593,12 @@ int main(int argc, char* argv[]) {
             //auto ldom        = layout.getLocalNDIndex();
             auto view_a      = solver.aN_m.getView();
             auto view_an1    = solver.aNm1_m.getView();
-            if(false)
+            //if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
-                    ret[2] = gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y, 0.2, 0.05);
+                    //std::cout << x << " x\n";
+                    //ret[2] = gauss(ippl::Vector<scalar, 3> {x,y,0.5}, 0.5, 0.05);
                     //(void)x;
                     //(void)y;
                     //(void)z;
@@ -563,12 +606,18 @@ int main(int argc, char* argv[]) {
             });
         }
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
-        //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
+        dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
+        //std::cout << "Before first step: " << solver.field_evaluation() << " ";
+        //std::cout << solver.total_energy << "\n";
         solver.solve();
+        std::cout.precision(10);
+        std::cout << "initial: " << solver.total_energy << "\n";
+        //goto exit;
         //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
+        std::vector<scalar> energies;
         for (unsigned int it = 1; it < iterations; ++it) {
-            msg << "Timestep number = " << it << " , time = " << it * dt << endl;
+            //msg << "Timestep number = " << it << " , time = " << it * dt << endl;
 
             if (!seed) {
                 // add pulse at center of domain
@@ -579,13 +628,20 @@ int main(int argc, char* argv[]) {
             }
 
             solver.solve();
+            std::cout << solver.total_energy << "\n";
+            //if(it > iterations / 6)
+            energies.push_back(solver.total_energy);
+            
             //
             
-            //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //if(it == iterations / 2){
             //    dumpPOV(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //}
         }
+        std::sort(energies.begin(), energies.end());
+        std::cout << energies.front() << " to " << energies.back() << "\n"; 
+        std::cout << "ERROR: " << std::abs(energies.back() - energies.front()) / (std::abs(energies.back()) + std::abs(energies.front())) << std::endl;
         //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], iterations + 1, hr[0], hr[1], hr[2]);
         if (!seed) {
             // add pulse at center of domain
@@ -629,13 +685,13 @@ int main(int argc, char* argv[]) {
                         //view_rho(i, j, k) = sine(0, dt);
                     //}
             }, error_accumulation);*/
-            error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z){
-                return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
-                (void)i;(void)x;
-                (void)j;(void)y;
-                (void)k;(void)z;
-            });
-            std::cout << "TOTAL ERROR: " << error_accumulation << std::endl;
+            //error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z){
+            //    return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
+            //    (void)i;(void)x;
+            //    (void)j;(void)y;
+            //    (void)k;(void)z;
+            //});
+            //std::cout << "TOTAL ERROR: " << error_accumulation << std::endl;
         }
     }
     exit:

@@ -205,23 +205,11 @@ namespace ippl {
         Kokkos::parallel_for(
             "ParticleAttrib::scatter", policy_type(0, *(this->localNum_mp)),
             KOKKOS_CLASS_LAMBDA(const size_t idx) {
-                // find nearest grid point
-                vector_type from                 = (pp1(idx) - origin);// * invdx + 0.5;
-                vector_type to                   = (pp2(idx) - origin);// * invdx + 0.5;
-                //Vector<int, Field::dim> index = l;
-                //Vector<T, Field::dim> whi     = l - index;
-                //Vector<T, Field::dim> wlo     = 1.0 - whi;
+                // Compute offset to origin. Conversion to grid space coordinates happens later!
+                vector_type from                 = (pp1(idx) - origin);
+                vector_type to                   = (pp2(idx) - origin);
 
-                //Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
-
-                // scatter
-                //These assertions have erroneous conditions
-                //for(unsigned int i = 0; i < Dim; ++i){
-                //    assert(from(i) >= 0);
-                //    assert(from(i) < view.extent(i));
-                //    assert(to(i) >= 0);
-                //    assert(to(i) < view.extent(i));
-                //}
+                //val is charge (or other quantity)
                 const value_type& val = dview_m(idx);
                 detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, val * dt_scale, lDom, nghost);
             });

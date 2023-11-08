@@ -171,6 +171,7 @@ namespace ippl {
         template<typename T>
         T fractional_part(T x){
             using Kokkos::floor;
+            //using ::floor;
             return x - floor(x);
         }
         template <unsigned long... ScatterPoint, typename T, unsigned Dim, typename IndexType>
@@ -181,11 +182,14 @@ namespace ippl {
             const Vector<T, Dim> hr, T scale, const NDIndex<Dim> lDom, int nghost) {
             
             // Define utility functions
-            (void)nghost;
 
             
             using Kokkos::max;
             using Kokkos::min;
+            using Kokkos::floor;
+            //using ::max;
+            //using ::min;
+            //using ::floor;
             Vector<T, Dim> from_in_grid_coordinates;
             Vector<T, Dim> to_in_grid_coordinates;
             // Calculate the indices for the scatter operation
@@ -195,8 +199,8 @@ namespace ippl {
                 to[i] += hr[i] * T(0.5);
                 from_in_grid_coordinates[i] = from[i] / hr[i];
                 to_in_grid_coordinates  [i] = to[i] / hr[i];
-                fromi[i] = Kokkos::floor(from_in_grid_coordinates[i]);
-                toi[i]   = Kokkos::floor(to_in_grid_coordinates[i]);
+                fromi[i] = floor(from_in_grid_coordinates[i]) + nghost;
+                toi[i]   = floor(to_in_grid_coordinates[i])   + nghost;
             }
             ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
             ippl::Vector<IndexType, Dim> toi_local = toi - lDom.first();
@@ -226,23 +230,19 @@ namespace ippl {
             // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;
             for (unsigned i = 0; i < Dim; i++) {
-                wlo[i] = 1.0 - fractional_part((from[i] + relay[i]) * 0.5 / hr[i]);
-                whi[i] = fractional_part((from[i] + relay[i]) * 0.5 / hr[i]);
+                wlo[i] = T(1.0) - fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
+                whi[i] = fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
             }
 
             // Perform the scatter operation for each scatter point
-            for(unsigned i = 0;i < Dim;i++){
-                //assert(fromi_local[i] < view.extent(i));
-                //assert(toi_local[i] < view.extent(i));
-            }
-            //return;
+
             auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, fromi_local, jcfrom, scale)
                  ^ ...);
             for (unsigned i = 0; i < Dim; i++) {
-                wlo[i] = 1.0 - fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
-                whi[i] = fractional_part((to[i] + relay[i]) * 0.5 / hr[i]);
+                wlo[i] = T(1.0) - fractional_part((to[i] + relay[i]) * T(0.5) / hr[i]);
+                whi[i] = fractional_part((to[i] + relay[i]) * T(0.5) / hr[i]);
             }
             auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
@@ -250,7 +250,7 @@ namespace ippl {
                  ^ ...);
 
             (void)_;
-            (void)__;
+            (void)__; // [[maybe_unused]] causes issues on certain compilers
         }
     }  // namespace detail
 }  // namespace ippl

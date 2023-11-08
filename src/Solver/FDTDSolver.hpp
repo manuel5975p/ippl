@@ -24,6 +24,7 @@
 
 #include "FDTDSolver.h"
 #include <cinttypes>
+#include <optional>
 #include "Field/HaloCells.h"
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
@@ -275,7 +276,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
-                                               VField_t* B, scalar timestep, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(1) {
+                                               VField_t* B, scalar timestep, VField_t* rad, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(1), radiation(rad) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = charge;
@@ -294,7 +295,8 @@ namespace ippl {
         // call the initialization function
         initialize();
     }
-
+    template<typename T>
+    auto sqr(T x){return x * x;};
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::~FDTDSolver(){};
 
@@ -306,9 +308,6 @@ namespace ippl {
         constexpr scalar mu0      = 1.0;  // 1.25663706212e-6;
         constexpr scalar epsilon0 = 1.0 / (c * c * mu0);
 
-        
-        
-        auto sqr = KOKKOS_LAMBDA(scalar x){return x * x;};
         // finite differences constants
         scalar a1 = 2.0
            * (1.0 - sqr(c * dt / hr_m[0]) - sqr(c * dt / hr_m[1])
@@ -349,7 +348,6 @@ namespace ippl {
         _bc 0, 1, 2> abc_x[] = {_bc 0, 1, 2> (hr_m, c, dt,  1), _bc 0, 1, 2>(hr_m, c, dt, -1)};
         _bc 1, 0, 2> abc_y[] = {_bc 1, 0, 2> (hr_m, c, dt,  1), _bc 1, 0, 2>(hr_m, c, dt, -1)};
         _bc 2, 0, 1> abc_z[] = {_bc 2, 0, 1> (hr_m, c, dt,  1), _bc 2, 0, 1>(hr_m, c, dt, -1)};
-
 
         auto view_rhoN = this->rhoN_mp->getView();
         auto view_JN   = this->JN_mp->getView();
@@ -397,8 +395,8 @@ namespace ippl {
                     const int kg = k + ldom[2].first() - nghost_a;
 
                     // interior values
-                    bool isInterior = true;//((ig >= 0) && (jg >= 0) && (kg >= 0) && (ig < nr_m[0])
-                                           //&& (jg < nr_m[1]) && (kg < nr_m[2]));
+                    bool isInterior = ((ig >= 0) && (jg >= 0) && (kg >= 0) && (ig < nr_m[0])
+                                           && (jg < nr_m[1]) && (kg < nr_m[2]));
                     scalar interior = -view_aNm1(i, j, k)[gd] + a1 * view_aN(i, j, k)[gd]
                                       + a2 * (view_aN(i + 1, j, k)[gd] + view_aN(i - 1, j, k)[gd])
                                       + a4 * (view_aN(i, j + 1, k)[gd] + view_aN(i, j - 1, k)[gd])
@@ -613,7 +611,7 @@ namespace ippl {
             }
         Kokkos::fence();
         //for (size_t gd = 0; gd < Dim; ++gd) {
-            if(false)
+            //if(false)
             Kokkos::parallel_for(
                 "Periodic boundaryie", ippl::getRangePolicy(view_aNp1, 0),
                 KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -665,20 +663,22 @@ namespace ippl {
         auto E_gatherview = bunch.E_gather.getView();
         auto B_gatherview = bunch.B_gather.getView();
         constexpr scalar e_mass = 0.5110;
-        constexpr scalar e_charge = -0.30282212088;
+        constexpr scalar e_charge = -0.30282212088 * 10000.0;
         scalar this_dt = this->dt;
         Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(const size_t i){
+            using Kokkos::sqrt;
+            //using ::sqrt;
             const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
             
             
             const ippl::Vector<scalar, 3> t1 = pgammabeta - e_charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
-            const scalar alpha = -e_charge * this_dt / (2 * e_mass * Kokkos::sqrt(1 + dot_prod(t1, t1)));
+            const scalar alpha = -e_charge * this_dt / (2 * e_mass * sqrt(1 + dot_prod(t1, t1)));
             const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
 
             const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
             const ippl::Vector<scalar, 3> ngammabeta = t3 - e_charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
 
-            rnp1view(i) = rview(i) + this_dt * ngammabeta / (Kokkos::sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));            
+            rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));            
         });
         //auto crpd = bunch.Q * ippl::cross(bunch.gamma_beta, bunch.B_gather);
         //bunch.gamma_beta = bunch.gamma_beta + (crpd / e_mass + bunch.E_gather * e_charge / e_mass);
@@ -703,218 +703,69 @@ namespace ippl {
     Tfields FDTDSolver<Tfields, Dim, M, C>::field_evaluation() {
         // magnetic field is the curl of the vector potential
         // we take the average of the potential at N and N+1
-        auto Aview   = this->aN_m.getView();
-        auto Ap1view = this->aNp1_m.getView();
-        if (false){}
-            /*lambda_dispatch(
-                *Bn_mp, 1,
-                KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ) {
-                    if (__builtin_popcount((unsigned int)occ) == 1) {
-                        switch (occ) {
-                            case x_min:
-                                Aview(i, j, k) = Aview(i + 1, j, k) * 2.0 - Aview(i + 2, j, k);
-                                Ap1view(i, j, k) =
-                                    Ap1view(i + 1, j, k) * 2.0 - Ap1view(i + 2, j, k);
-                                break;
-                            case x_max:
-                                Aview(i, j, k) = Aview(i - 1, j, k) * 2.0 - Aview(i - 2, j, k);
-                                Ap1view(i, j, k) =
-                                    Ap1view(i - 1, j, k) * 2.0 - Ap1view(i - 2, j, k);
-                                break;
-                            case y_min:
-                                Aview(i, j, k) = Aview(i, j + 1, k) * 2.0 - Aview(i, j + 2, k);
-                                Ap1view(i, j, k) =
-                                    Ap1view(i, j + 1, k) * 2.0 - Ap1view(i, j + 2, k);
-                                break;
-                            case y_max:
-                                Aview(i, j, k) = Aview(i, j - 1, k) * 2.0 - Aview(i, j - 2, k);
-                                Ap1view(i, j, k) =
-                                    Ap1view(i, j - 1, k) * 2.0 - Ap1view(i, j - 2, k);
-                                break;
-                            case z_min:
-                                Aview(i, j, k) = Aview(i, j, k + 1) * 2.0 - Aview(i, j, k + 2);
-                                Ap1view(i, j, k) =
-                                    Ap1view(i, j, k + 1) * 2.0 - Ap1view(i, j, k + 2);
-                                break;
-                            case z_max:
-                                Aview(i, j, k) = Aview(i, j, k - 1) * 2.0 - Aview(i, j, k - 2);
-                                Ap1view(i, j, k) =
-                                    Ap1view(i, j, k - 1) * 2.0 - Ap1view(i, j, k - 2);
-                                break;
-                        }
-                    }
-                },
-                KOKKOS_LAMBDA(size_t i, size_t j, size_t k) { CAST_TO_VOID(i, j, k); });*/
+        typename FDTDSolver<Tfields, Dim, M, C>::Field_t kurl = phiN_m.deepCopy();
+        //kurl = ippl::dot(phiN_m, phiN_m);
+        //std::cout << "phisum: " << kurl.sum() << "\n";
+        {
+            size_t i = (size_t)(0.48 / kurl.get_mesh().getMeshSpacing()[0]) + 1;
+            size_t j = (size_t)(0.48 / kurl.get_mesh().getMeshSpacing()[1]) + 1;
+            size_t k = (size_t)(0.48 / kurl.get_mesh().getMeshSpacing()[2]) + 1;
+            //std::cout << "Kurlmax: " << kurl.getView()(i, j, k) << "\n\n";
+            //std::cout << "Surrounding: ";
+            //std::cout << aN_m.getView()(i, j, k - 1) << " ";
+            //std::cout << aN_m.getView()(i, j, k + 1) << " ";
+            //std::cout << ippl::Vector<double, 3>((aN_m.getView()(i, j, k + 1) - aN_m.getView()(i, j, k - 1)) / kurl.get_mesh().getMeshSpacing()[2] / 2.0) << " ";
+            //std::cout << std::endl;
 
-        (*Bn_mp) = 0.5 * (curl(aN_m) + curl(aNp1_m));
-        //auto bdiv = ippl::div(*Bn_mp);
-        //scalar divi = volumetric_integral(KOKKOS_LAMBDA(size_t i,  size_t j,  size_t k, scalar x, scalar y, scalar z) -> scalar{
-        //    (void)x;
-        //    (void)y;
-        //    (void)z;
-        //    if(boundary_distance(i,j,k,Bn_mp->getView().extent(0),Bn_mp->getView().extent(1), Bn_mp->getView().extent(2)) > 0)
-        //        return bdiv(i, j, k);
-        //    return 0.0;
-        //});
-        ///std::cout << "Divergence Integral = " << divi << "\n";
+        }
+
         // electric field is the time derivative of the vector potential
         // minus the gradient of the scalar potential
+        //auto expreschen = -(aNp1_m - aN_m) / dt - grad(phiN_m);
+        //auto expression = aNp1_m + aN_m;
         (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
-
-        //std::cout << En_mp->getView()(5,5,5) << "\n";
-        
-        return 0.0;
-        auto Bview = Bn_mp->getView();
-        auto Eview = En_mp->getView();
-
-        // std::cout << hr_m << " spac\n";
-        /*scalar maxE = 0;
-        double maxB = 0;
-        size_t discard = 2;
-        for(size_t i = discard;i < Bview.extent(0) - discard;i++){
-            for(size_t j = discard;j < Bview.extent(1) - discard;j++){
-                for(size_t k = discard;k < Bview.extent(2) - discard;k++){
-                    maxB = std::max({maxB, std::abs(Bview(i, j, k)[0])
-                                         , std::abs(Bview(i, j, k)[1])
-                                         , std::abs(Bview(i, j, k)[2])});
-                }
-            }
+        (*Bn_mp) = (curl(aN_m) + curl(aNp1_m)) * 0.5;
+        if(radiation){
+            (*radiation) = ippl::cross(*En_mp, *Bn_mp);
         }
-        for(size_t i = discard;i < Eview.extent(0) - discard;i++){
-            for(size_t j = discard;j < Eview.extent(1) - discard;j++){
-                for(size_t k = discard;k < Eview.extent(2) - discard;k++){
-                    maxE = std::max({maxE, std::abs(Eview(i, j, k)[0])
-                                         , std::abs(Eview(i, j, k)[1])
-                                         , std::abs(Eview(i, j, k)[2])});
-                }
-            }
-        }*/
-        // std::printf("maxB, maxE: %f, %f\n", maxB, maxE);
 
-        Kokkos::View<scalar***> energy_density("Energies", Eview.extent(0), Eview.extent(1),
-                                               Eview.extent(2));
-        Kokkos::View<ippl::Vector<scalar, 3>***> radiation_density(
-            "Radiations", Eview.extent(0), Eview.extent(1), Eview.extent(2));
-        Kokkos::parallel_for(
-            ippl::getRangePolicy(energy_density), KOKKOS_LAMBDA(size_t i, size_t j, size_t k) {
-                ippl::Vector<scalar, 3> E = Eview(i, j, k);
-                ippl::Vector<scalar, 3> B = Bview(i, j, k);
-                // std::cout << "j = " << j << "\n";
-                ippl::Vector<scalar, 3> poynting = ippl::cross(E, B);
-                //std::cout << dot_prod(E, B) << "\n";
-                energy_density(i, j, k)    = (dot_prod(B, B) + dot_prod(E, E)) * 0.5;
-                radiation_density(i, j, k) = poynting;
-            });
+        typename FDTDSolver<Tfields, Dim, M, C>::Field_t energy_density = phiN_m.deepCopy();
+        auto edview = energy_density.getView();
+        auto aview = aN_m.getView();
+        auto eview = En_mp->getView();
+        auto bview = Bn_mp->getView();
+        double EE = 0.0;
+        double BE = 0.0;
+        double* EEptr = &EE;
+        double* BEptr = &BE;
+        
+        Kokkos::parallel_for(aN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k){
+            //edview(i,j,k) = aview(i,j,k)[2];
+            //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
+            *EEptr += squaredNorm(eview(i, j, k));
+            *BEptr += squaredNorm(bview(i, j, k));
+            edview(i,j,k) = squaredNorm(eview(i,j,k)) + squaredNorm(bview(i,j,k));
+        });
         Kokkos::fence();
-
-        /*lambda_dispatch(*Bn_mp, 1, KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion
-        occ){
-            //std::cout << "Reached\n";
-            if(occ == boundary_occlusion::y_min){
-                ippl::Vector<scalar, 3> E = Eview(i, j, k);
-                ippl::Vector<double, 3> B = Bview(i, j, k);
-                //std::cout << "j = " << j << "\n";
-                ippl::Vector<double, 3> poynting = cross(E, B);
-                energies(i, j, k) = (squaredNorm(B) + squaredNorm(E)) * hr_m[0] * hr_m[1] * hr_m[2];
-                std::cout << "poynting " << poynting[1] << "\n";
-                *pointer_to_absorbed_energy_xD += (squaredNorm(B) + squaredNorm(E)) * hr_m[0] *
-        hr_m[2] * dt; //Because the surface normal is negative -y unit vector
-            }
-        },
-        KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
-            (void)i;(void)j;(void)k;
-        }, 2);*/
-
-        scalar totalenergy       = 0.0;
-        accumulation_type absorb = 0.0;
-        if(false)
-        Kokkos::parallel_reduce(
-            ippl::getRangePolicy(energy_density, 12),
-            KOKKOS_LAMBDA(size_t i, size_t j, size_t k, scalar& ref) {
-                ref += energy_density(i, j, k);
-            },
-            totalenergy);
-        if(false)
-        Kokkos::parallel_reduce(
-            ippl::getRangePolicy(energy_density, 2),
-            KOKKOS_CLASS_LAMBDA(size_t i, size_t j, size_t k, accumulation_type & ref) {
-                std::array<axis_aligned_occlusion, 3> ijk_occlusion_for_cells_before_abc =
-                    boundary_occlusion_of(
-                        12, std::make_tuple(i, j, k),
-                        std::make_tuple(radiation_density.extent(0), radiation_density.extent(1),
-                                        radiation_density.extent(2)));
-                /*if((i == 5 || j == 5 || k == 5)){
-                    printf("%d %d %d\n", ijk_occlusion_for_cells_before_abc[0],
-                ijk_occlusion_for_cells_before_abc[1], ijk_occlusion_for_cells_before_abc[2]);
-                }
-                else{
-
-                }*/
-                const scalar volume = hr_m[0] * hr_m[1] * hr_m[2];
-                ippl::Vector<scalar, 3> normal(0.0);
-                for (size_t d = 0; d < 3; d++) {
-                    // bool skip = false;
-                    if (ijk_occlusion_for_cells_before_abc[d] & AT_MAX) {
-                        normal[d] = 1.0;
-                    }
-                    if (ijk_occlusion_for_cells_before_abc[d] & AT_MIN) {
-                        normal[d] = -1.0;
-                    }
-                    if (ijk_occlusion_for_cells_before_abc[d] == 0) {
-                        normal[d] = 0.0;
-                    }
-                    if (ref != 0.0
-                        && dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d] != 0.0
-                        && d != 1 && normal[d] != 0.0) {
-                        scalar ratio = ((dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d]));
-                        // if(std::abs(ratio) > 1000.0)
-                        // printf("Ratio: %f", ratio);
-                        (void)ratio;
-                    }
-                    ref += dot_prod(normal, radiation_density(i, j, k)) * volume / hr_m[d];
-                    //if (false) {
-                    //    char buffer[4096] = {0};
-                    //    char* bp          = buffer;
-                    //    if(d == 1 && normal[d] == -1.0 && i == nr_m[0] / 2 && k == nr_m[2] / 2 /*&& dot_prod(Eview(i, j, k), Bview(i, j, k)) != 0.0*/){
-                    //        bp += sprintf(bp, "E: %f, %f, %f\n", Eview(i, j, k)[0],
-                    //                      Eview(i, j, k)[1], Eview(i, j, k)[2]);
-                    //        bp += sprintf(bp, "B: %f, %f, %f\n", Bview(i, j, k)[0],
-                    //                      Bview(i, j, k)[1], Bview(i, j, k)[2]);
-                    //        bp += sprintf(bp, "Dot product: %f\n",
-                    //                      dot_prod(Eview(i, j, k), Bview(i, j, k)));
-                    //        ippl::Vector<scalar, 3> cross_prod =
-                    //            ippl::cross(Eview(i, j, k), Bview(i, j, k));
-                    //        bp += sprintf(bp, "Cross: %f, %f, %f\n", cross_prod[0], cross_prod[1],
-                    //                      cross_prod[2]);
-                    //        bp += sprintf(bp, "Normal: %f, %f, %f\n", normal[0], normal[1],
-                    //                      normal[2]);
-                    //        bp += sprintf(bp, "Dot: %f\n\n", dot_prod(cross_prod, normal));
-                    //        puts(buffer);
-                    //    }
-                    //}
-                    // else{
-                    //     skip = true;
-                    // }
-                }
-            },
-            absorb);
-        Kokkos::fence();
-        this->total_energy = totalenergy * hr_m[0] * hr_m[1] * hr_m[2];
-        this->absorbed__energy -= absorb * dt;
-        return totalenergy * hr_m[0] * hr_m[1] * hr_m[2];
+        std::cout << "E contr: " << EE * hr_m[0] * hr_m[1] * hr_m[2] << "B contr: " << BE * hr_m[0] * hr_m[1] * hr_m[2] << "\n"; 
+        //energy_density = (ippl::dot(*En_mp, *En_mp) + ippl::dot(*Bn_mp, *Bn_mp)) * scalar(0.5);
+        this->total_energy = (EE + BE) * hr_m[0] * hr_m[1] * hr_m[2] + bunch_energy(this->bunch);
+        return (EE + BE) * hr_m[0] * hr_m[1] * hr_m[2];
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
     KOKKOS_FUNCTION Tfields FDTDSolver<Tfields, Dim, M, C>::gaussian(size_t it, size_t i, size_t j,
                                                     size_t k) const noexcept {
         // return 1.0;
+        using Kokkos::exp;
+        //using ::exp;
         const scalar y = 1.0 - (j - 2) * hr_m[1];  // From the max boundary; fix this sometime
         const scalar t = it * dt;
         scalar plane_wave_excitation_x = (y - t < 0) ? -(y - t) : 0;
         (void)i;
         (void)j;
         (void)k;
-        return 100 * Kokkos::exp(-sq((2.0 - plane_wave_excitation_x)) * 2);
+        return scalar(100) * exp(-sq((scalar(2.0) - plane_wave_excitation_x)) * scalar(2));
 
         // scalar arg = Kokkos::pow((1.0 - it * dt) / 0.25, 2);
         // return 100 * Kokkos::exp(-arg);
@@ -927,11 +778,13 @@ namespace ippl {
         constexpr scalar mu0      = 1.0;  // 1.25663706212e-6;
         constexpr scalar epsilon0 = 1.0 / (c * c * mu0);
         constexpr scalar electron_charge = 0.30282212088;
-        bunch.create(!!!ippl::Comm->rank());
-        bunch.Q = electron_charge;
+        constexpr scalar electron_mass = 0.5110;
+        bunch.create(!!!ippl::Comm->rank() * particle_count);
+        bunch.Q = electron_charge * 10000.0;
+        bunch.mass = electron_mass;
         bunch.R = ippl::Vector<scalar, 3>(0.4);
         bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e6, 0.0};
-        bunch.R_np1 = ippl::Vector<scalar, 3>(0.4);
+        bunch.R_np1 = ippl::Vector<scalar, 3>(0.3);
         // get layout and mesh
         layout_mp = &(this->rhoN_mp->getLayout());
         mesh_mp   = &(this->rhoN_mp->get_mesh());
@@ -962,12 +815,14 @@ namespace ippl {
     template<typename callable>
     void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(callable c){
         auto view_a      = aN_m.getView();
+        auto view_phi      = phiN_m.getView();
         auto view_an1    = aNm1_m.getView();
+        auto view_phin1    = phiNm1_m.getView();
         auto ldom = layout_mp->getLocalNDIndex();
-        std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
+        //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = aN_m.getNghost();
         Kokkos::parallel_for(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost), KOKKOS_LAMBDA(const int i, const int j, const int k){
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;
@@ -975,6 +830,10 @@ namespace ippl {
                 scalar x = (scalar(ig) + 0.5) * hr_m[0];// + origin[0];
                 scalar y = (scalar(jg) + 0.5) * hr_m[1];// + origin[1];
                 scalar z = (scalar(kg) + 0.5) * hr_m[2];// + origin[2];
+                //view_a  (i, j, k) = c(x, y, z);
+                //view_an1(i, j, k) = c(x, y, z);
+                view_phi(i,j,k) = 0.0;
+                view_phin1(i,j,k) = 0.0;
                 view_a  (i, j, k) = c(x, y, z);
                 view_an1(i, j, k) = c(x, y, z);
             }

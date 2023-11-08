@@ -143,6 +143,18 @@ namespace ippl {
     KOKKOS_INLINE_FUNCTION constexpr typename Vector<T, Dim>::iterator Vector<T, Dim>::begin() {
         return data_m;
     }
+    template <typename T, unsigned Dim>
+    KOKKOS_INLINE_FUNCTION T Vector<T, Dim>::norm() const{
+        return Kokkos::sqrt(squaredNorm());
+    }
+    template <typename T, unsigned Dim>
+    KOKKOS_INLINE_FUNCTION T Vector<T, Dim>::squaredNorm() const{
+        T accum = 0;
+        for(unsigned i = 0;i < Dim;++i){
+            accum += data_m[i] * data_m[i];
+        }
+        return accum;
+    }
 
     template <typename T, unsigned Dim>
     KOKKOS_INLINE_FUNCTION constexpr typename Vector<T, Dim>::iterator Vector<T, Dim>::end() {

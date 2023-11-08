@@ -32,6 +32,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     Bunch(PLayout& playout)
         : ippl::ParticleBase<PLayout>(playout) {
         this->addAttribute(Q);
+        this->addAttribute(mass);
         this->addAttribute(gamma_beta);
         this->addAttribute(R_np1);
         this->addAttribute(E_gather);
@@ -44,11 +45,29 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
     using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
     charge_container_type Q;
+    charge_container_type mass;
     velocity_container_type gamma_beta;
     typename ippl::ParticleBase<PLayout>::particle_position_type R_np1;
     vector_container_type E_gather;
     vector_container_type B_gather;
 };
+template<typename _scalar, class PLayout>
+_scalar bunch_energy(const Bunch<_scalar, PLayout>& bantsch){
+    using scalar = _scalar;
+    scalar ret = 0;
+    auto gamma_beta_view = bantsch.gamma_beta.getView();
+    auto mass_view = bantsch.mass.getView();
+    Kokkos::parallel_reduce(bantsch.getLocalNum(), KOKKOS_LAMBDA(size_t i, _scalar& ref){
+        using Kokkos::sqrt;
+        ippl::Vector<_scalar, 3> gbi = gamma_beta_view(i);
+        gbi *= ippl::detail::Scalar<scalar>(mass_view(i));
+        scalar total_energy = mass_view(i) * mass_view(i) + gbi.squaredNorm();
+
+
+        ref += sqrt(total_energy);
+    }, ret);
+    return ret;
+}
 namespace ippl {
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<Tfields, Dim>,
               class C = typename M::DefaultCentering>
@@ -73,14 +92,14 @@ namespace ippl {
 
         // constructor and destructor
         FDTDSolver(Field_t* charge, VField_t* current, VField_t* E, VField_t* B,
-                   scalar timestep = 0.05, bool seed_ = false);
+                   scalar timestep = 0.05, VField_t* radiation = nullptr, bool seed_ = false);
         ~FDTDSolver();
 
         // finite differences time domain solver for potentials (A and phi)
         void solve();
 
         // evaluates E and B fields using computed potentials
-        scalar field_evaluation();
+        Tfields field_evaluation();
 
         // gaussian pulse
         KOKKOS_FUNCTION scalar gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
@@ -117,6 +136,9 @@ namespace ippl {
         // fields containing reference to charge and current
         Field_t* rhoN_mp;
         VField_t* JN_mp;
+
+        //NULLABLE!
+        VField_t* radiation;
 
         // scalar and vector potentials at n-1, n, n+1 times
         Field_t phiNm1_m;

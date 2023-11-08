@@ -132,7 +132,7 @@ namespace ippl {
     DefineUnaryOperation(Erf,    erf,   Kokkos::erf(u_m[i]),   Kokkos::erf(u_m(args...)))
 // clang-format on
 /// @endcond
-
+// if(sizeof(E1) + sizeof(E2) != sizeof(fun<E1, E2>)){std::cout << "One: " << sizeof(E1) + sizeof(E2) << ", " << sizeof(fun<E1, E2>) << std::endl;}
 /*!
  * Macro to overload C++ operators for the Scalar, BareField and Vector class.
  * @param fun name of the expression template function
@@ -148,7 +148,7 @@ namespace ippl {
         KOKKOS_FUNCTION                                                                        \
         fun(const E1& u, const E2& v)                                                          \
             : u_m(u)                                                                           \
-            , v_m(v) {}                                                                        \
+            , v_m(v) { }                                                                        \
                                                                                                \
         KOKKOS_INLINE_FUNCTION auto operator[](size_t i) const { return op1; }                 \
                                                                                                \

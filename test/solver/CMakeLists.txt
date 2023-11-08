@@ -31,6 +31,7 @@ target_link_libraries (
     TestFDTDSolver
     ${IPPL_LIBS}
     ${MPI_CXX_LIBRARIES}
+    quadmath
 )
 
 if (ENABLE_FFT)

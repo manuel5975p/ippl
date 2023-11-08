@@ -121,12 +121,16 @@ namespace ippl {
     template <typename E, size_t N>
     BareField<T, Dim, ViewArgs...>& BareField<T, Dim, ViewArgs...>::operator=(
         const detail::Expression<E, N>& expr) {
-        using capture_type     = detail::CapturedExpression<E, N>;
-        capture_type expr_     = reinterpret_cast<const capture_type&>(expr);
+        const E expr_ = (const E&)(expr);
+        
+        //using capture_type     = detail::CapturedExpression<E, N>;
+        //std::cout << sizeof(capture_type) << " : " << N << "\n";
+        //auto vc = dview_m;
+        //capture_type expr_     = reinterpret_cast<const capture_type&>(expr);
         using index_array_type = typename RangePolicy<Dim, execution_space>::index_array_type;
         ippl::parallel_for(
             "BareField::operator=(const Expression&)", getRangePolicy(dview_m, nghost_m),
-            KOKKOS_CLASS_LAMBDA(const index_array_type& args) {
+            KOKKOS_LAMBDA(const index_array_type& args) {
                 apply(dview_m, args) = apply(expr_, args);
             });
         return *this;
