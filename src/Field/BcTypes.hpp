@@ -147,8 +147,8 @@ namespace ippl {
             << ", Face = " << this->face_m;
     }
 
-    template <typename Field>
-    void MurABC1st<Field>::write(std::ostream& out) const{
+    template <typename Field, unsigned face_template_argument>
+    void MurABC1st<Field, face_template_argument>::write(std::ostream& out) const{
         out << "MurABC1st"
             << ", Face = " << this->face_m;
     }
@@ -359,5 +359,80 @@ namespace ippl {
                     apply(view, coords) = left;
                 });
         }
+    }
+    template <typename Field, unsigned face_template_arg>
+    void MurABC1st<Field, face_template_arg>::apply(Field& field) {
+        
+        constexpr unsigned int face = face_template_arg;
+        constexpr unsigned d        = face / 2;
+        constexpr int offst = ((face & 1) == 0) ? 1 : -1;
+        if (Comm->size() > 1) {
+            const Layout_t& layout = field.getLayout();
+            const auto& lDomains   = layout.getHostLocalDomains();
+            const auto& domain     = layout.getDomain();
+            int myRank             = Comm->rank();
+
+            bool isBoundary = (lDomains[myRank][d].max() == domain[d].max())
+                              || (lDomains[myRank][d].min() == domain[d].min());
+
+            if (!isBoundary)
+                return;
+        }
+
+        // If we are here then it is a processor with the face on the physical
+        // boundary or it is the single core case. Then the following code is same
+        // irrespective of either it is a single core or multi-core case as the
+        // non-periodic BC is local to apply.
+        typename Field::view_type& view = field.getView();
+        using view_type = typename Field::view_type;
+        const int nghost                = field.getNghost();
+        int src, dest;
+
+        // It is not clear what it exactly means to do extrapolate
+        // BC for nghost >1
+        if (nghost > 1) {
+            throw IpplException(__PRETTY_FUNCTION__, "nghost > 1 not supported");
+        }
+
+        if (d >= Dim) {
+            throw IpplException(__PRETTY_FUNCTION__, "face number wrong");
+        }
+
+        // If face & 1 is true, then it is an upper BC
+        if (face & 1) {
+            src  = view.extent(d) - 2;
+            dest = src + 1;
+        } else {
+            src  = 1;
+            dest = src - 1;
+        }
+        scalar_type dx = hr_m[d];
+        using exec_space = typename Field::execution_space;
+        using index_type = typename RangePolicy<Dim, exec_space>::index_type;
+        Kokkos::Array<index_type, Dim> begin, end;
+        for (unsigned i = 0; i < Dim; i++) {
+            begin[i] = nghost;
+            end[i]   = view.extent(i) - nghost;
+        }
+        begin[d]               = src;
+        end[d]                 = src + 1;
+
+        using index_array_type = typename RangePolicy<Dim, exec_space>::index_array_type;
+        ippl::parallel_for(
+            "Assign extrapolate BC", createRangePolicy<Dim, exec_space>(begin, end),
+            KOKKOS_CLASS_LAMBDA(index_array_type _args) {
+                // to avoid ambiguity with the member function
+                using ippl::apply;
+                index_array_type args(_args);
+
+                //T value = apply(view, args);
+
+                args[d] = dest;
+
+                //apply_with_offset(view, args) = slope_m * value + offset_m;
+                //std::cout << "Dx = " << dx << " dt = " << dt << std::endl;
+                T ret = (apply_with_offset<view_type, index_array_type, d>(view, args, offst) - apply(view, args)) * (dt / dx);
+                apply(view, args) += ret;
+            });
     }
 }  // namespace ippl

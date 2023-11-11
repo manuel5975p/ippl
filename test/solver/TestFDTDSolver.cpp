@@ -558,7 +558,30 @@ int main(int argc, char* argv[]) {
 
         // define an FDTDSolver object
         ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, &radiation,seed);
-        
+        using s_t = ippl::FDTDSolver<scalar, Dim>;
+        s_t::VField_t::BConds_t all_periodic;
+        s_t::Field_t::BConds_t all_periodics;
+        auto bcsetter_single = [&all_periodic, &all_periodics, hr, dt]<size_t Idx>(const std::index_sequence<Idx>& seq){
+            //all_periodic [Idx] = std::make_shared<ippl::MurABC1st<s_t::VField_t, Idx>>(Idx, hr, 1.0, dt);
+            //all_periodics[Idx] = std::make_shared<ippl::MurABC1st<s_t::Field_t , Idx>>(Idx, hr, 1.0, dt);
+            all_periodic [Idx] = std::make_shared<ippl::NoBcFace<s_t::VField_t>>(Idx);// hr, 1.0, dt);
+            all_periodics[Idx] = std::make_shared<ippl::NoBcFace<s_t::Field_t>>(Idx );// hr, 1.0, dt);
+            (void)seq;
+            return 0;
+        };
+        auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>& seq){
+            int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
+            (void)seq;
+            (void) x;
+        };
+        bcsetter(std::make_index_sequence<Dim * 2>{});
+        solver.aN_m.setFieldBC(all_periodic);
+        solver.aNp1_m.setFieldBC(all_periodic);
+        solver.aNm1_m.setFieldBC(all_periodic);
+        solver.phiN_m.setFieldBC(all_periodics);
+        solver.phiNp1_m.setFieldBC(all_periodics);
+        solver.phiNm1_m.setFieldBC(all_periodics);
+
         //if(!ippl::Comm->rank()){
         //    std::cout << solver.aN_m.getLayout().getDomain().last() << "\n";
         //}
@@ -567,9 +590,10 @@ int main(int argc, char* argv[]) {
         //solver.bconds[0] = ippl::NO_FACE;
         //solver.bconds[1] = ippl::NO_FACE;
         //solver.bconds[2] = ippl::NO_FACE;
-        solver.bconds[0] = ippl::PERIODIC_FACE;
-        solver.bconds[1] = ippl::PERIODIC_FACE;
-        solver.bconds[2] = ippl::PERIODIC_FACE;
+        
+        solver.bconds[0] = ippl::MUR_ABC_1ST;
+        solver.bconds[1] = ippl::MUR_ABC_1ST;
+        solver.bconds[2] = ippl::MUR_ABC_1ST;
         decltype(solver)::bunch_type bunch_buffer(solver.pl);
         solver.pl.update(solver.bunch, bunch_buffer);
 
@@ -598,7 +622,7 @@ int main(int argc, char* argv[]) {
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
                     //std::cout << x << " x\n";
-                    //ret[2] = gauss(ippl::Vector<scalar, 3> {x,y,0.5}, 0.5, 0.05);
+                    ret[2] = 0.1 * gauss(ippl::Vector<scalar, 3> {x,y,0.2}, 0.2, 0.05);
                     //(void)x;
                     //(void)y;
                     //(void)z;
@@ -606,7 +630,8 @@ int main(int argc, char* argv[]) {
             });
         }
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
-        dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
+        //solver.aN_m.setFieldBC()
+        //dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
         //std::cout << "Before first step: " << solver.field_evaluation() << " ";
         //std::cout << solver.total_energy << "\n";
         solver.solve();
@@ -617,6 +642,7 @@ int main(int argc, char* argv[]) {
         // time-loop
         std::vector<scalar> energies;
         for (unsigned int it = 1; it < iterations; ++it) {
+            LOG("Timestep number: " << it);
             //msg << "Timestep number = " << it << " , time = " << it * dt << endl;
 
             if (!seed) {
@@ -634,7 +660,7 @@ int main(int argc, char* argv[]) {
             
             //
             
-            dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //if(it == iterations / 2){
             //    dumpPOV(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //}

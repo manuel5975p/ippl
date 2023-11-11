@@ -78,18 +78,7 @@ KOKKOS_INLINE_FUNCTION axis_aligned_occlusion& operator&=(axis_aligned_occlusion
     a = (axis_aligned_occlusion)(static_cast<unsigned int>(a) & b);
     return a;
 }
-template <typename View, typename Coords, unsigned int axis, size_t... Idx>
-KOKKOS_INLINE_FUNCTION constexpr decltype(auto) apply_impl_with_offset(const View& view,
-                                                           const Coords& coords,
-                                                           int offset,
-                                                           const std::index_sequence<Idx...>&) {
-    return view((coords[Idx] + offset * !!(Idx == axis))...);
-}
-template <typename View, typename Coords, unsigned axis>
-KOKKOS_INLINE_FUNCTION constexpr decltype(auto) apply_with_offset(const View& view, const Coords& coords, int offset) {
-    using Indices = std::make_index_sequence<ippl::ExtractExpressionRank::getRank<Coords>()>;
-    return apply_impl_with_offset<View, Coords, axis>(view, coords, offset, Indices{});
-}
+
 template<typename _scalar, unsigned _main_axis, unsigned... _side_axes>
 struct first_order_abc{
     using scalar = _scalar;
@@ -114,9 +103,9 @@ struct first_order_abc{
     KOKKOS_INLINE_FUNCTION auto operator()(const view_type& a_n, const view_type& a_nm1,const view_type& a_np1, const Coords& c)const -> typename view_type::value_type{
         using value_t = typename view_type::value_type;
         
-        value_t ret = beta0 * (apply_with_offset<view_type, Coords, ~0u>(a_nm1, c, sign) + apply_with_offset<view_type, Coords, main_axis>(a_np1, c, sign))
-                    + beta1 * (apply_with_offset<view_type, Coords, ~0u>(a_n, c, sign) + apply_with_offset<view_type, Coords, main_axis>(a_n, c, sign))
-                    + beta2 * (apply_with_offset<view_type, Coords, main_axis>(a_nm1, c, sign));
+        value_t ret = beta0 * (ippl::apply_with_offset<view_type, Coords, ~0u>(a_nm1, c, sign) + apply_with_offset<view_type, Coords, main_axis>(a_np1, c, sign))
+                    + beta1 * (ippl::apply_with_offset<view_type, Coords, ~0u>(a_n, c, sign) + apply_with_offset<view_type, Coords, main_axis>(a_n, c, sign))
+                    + beta2 * (ippl::apply_with_offset<view_type, Coords, main_axis>(a_nm1, c, sign));
         return ret;
     }
 };
@@ -276,7 +265,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
-                                               VField_t* B, scalar timestep, VField_t* rad, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(1), radiation(rad) {
+                                               VField_t* B, scalar timestep, VField_t* rad, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(0), radiation(rad) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = charge;
@@ -556,6 +545,9 @@ namespace ippl {
                         
                         //for(unsigned ax = 0;ax < Dim;ax++){
                             if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
+                                if(gd == 0 && i == 0){
+                                    //std::cout << i << ", " << std::get<0>(extenz) << "\n";
+                                }
                                 if(gd == 0)
                                     view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                                 if(gd == 1)
@@ -822,7 +814,7 @@ namespace ippl {
         //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = aN_m.getNghost();
         Kokkos::parallel_for(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost), KOKKOS_LAMBDA(const int i, const int j, const int k){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost + 1), KOKKOS_LAMBDA(const int i, const int j, const int k){
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;

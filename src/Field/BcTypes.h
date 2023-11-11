@@ -83,7 +83,10 @@ namespace ippl {
             bool changesPhysicalCells() const { return changePhysical_m; }
 
         protected:
-            // What face to apply the boundary condition to.
+            // What face to apply the boundary condition to. 
+            //This is an integer in [0, Dim * 2[, with even numbers describing min-boundary conditions and odd ones max.
+            //The axis is given by face_m / 2
+            //The side is given by face_m % 2 = face_m & 1
             unsigned int face_m;
 
             // True if this boundary condition changes physical cells.
@@ -200,7 +203,7 @@ namespace ippl {
         typename Field::halo_type::databuffer_type haloData_m;
     };
         
-    template <typename Field>
+    template <typename Field, unsigned face_template_arg>
     class MurABC1st : public detail::BCondBase<Field> {
         constexpr static unsigned Dim = Field::dim;
         using T                       = typename Field::value_type;
@@ -216,6 +219,7 @@ namespace ippl {
         virtual FieldBC getBCType() const { return MUR_ABC_1ST; }
 
         virtual void apply(Field& field);
+        virtual void findBCNeighbors(Field& field){}
 
         virtual void write(std::ostream& out) const;
 

@@ -80,6 +80,19 @@ namespace ippl {
         return apply_impl(view, coords, Indices{});
     }
 
+    template <typename View, typename Coords, unsigned int axis, size_t... Idx>
+    KOKKOS_INLINE_FUNCTION constexpr decltype(auto) apply_impl_with_offset(const View& view,
+                                                               const Coords& coords,
+                                                               int offset,
+                                                               const std::index_sequence<Idx...>&) {
+        return view((coords[Idx] + offset * !!(Idx == axis))...);
+    }
+    template <typename View, typename Coords, unsigned axis>
+    KOKKOS_INLINE_FUNCTION constexpr decltype(auto) apply_with_offset(const View& view, const Coords& coords, int offset) {
+        using Indices = std::make_index_sequence<ippl::ExtractExpressionRank::getRank<Coords>()>;
+        return apply_impl_with_offset<View, Coords, axis>(view, coords, offset, Indices{});
+    }
+
 #define DefineUnaryOperation(fun, name, op1, op2)                              \
     template <typename E>                                                      \
     struct fun : public detail::Expression<fun<E>, sizeof(E)> {                \
