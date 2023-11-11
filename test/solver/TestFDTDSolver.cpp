@@ -622,7 +622,7 @@ int main(int argc, char* argv[]) {
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
                     //std::cout << x << " x\n";
-                    ret[2] = 0.1 * gauss(ippl::Vector<scalar, 3> {x,y,0.2}, 0.2, 0.05);
+                    ret[2] = 0.1 * gauss(ippl::Vector<scalar, 3> {x,0.5,0.5}, 0.5, 0.08);
                     //(void)x;
                     //(void)y;
                     //(void)z;

@@ -545,15 +545,19 @@ namespace ippl {
                         
                         //for(unsigned ax = 0;ax < Dim;ax++){
                             if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
-                                if(gd == 0 && i == 0){
-                                    //std::cout << i << ", " << std::get<0>(extenz) << "\n";
+                                int offs = bocc[gd] == AT_MIN ? 1 : -1;
+                                if(gd == 0){
+                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
+                                    //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                                 }
-                                if(gd == 0)
-                                    view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-                                if(gd == 1)
-                                    view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-                                if(gd == 2)
-                                    view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                if(gd == 1){
+                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
+                                    //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                }
+                                if(gd == 2){
+                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
+                                    //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                }
                             }
                         return;
                         //}
@@ -814,7 +818,7 @@ namespace ippl {
         //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = aN_m.getNghost();
         Kokkos::parallel_for(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost + 1), KOKKOS_LAMBDA(const int i, const int j, const int k){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost), KOKKOS_LAMBDA(const int i, const int j, const int k){
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;
