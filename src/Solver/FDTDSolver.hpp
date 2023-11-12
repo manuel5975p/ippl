@@ -265,7 +265,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
-                                               VField_t* B, scalar timestep, VField_t* rad, bool seed_) : pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(0), radiation(rad) {
+                                               VField_t* B, scalar timestep, VField_t* rad, bool seed_) : radiation(rad), pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(8) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = charge;
@@ -654,25 +654,26 @@ namespace ippl {
         bunch.E_gather.gather(*this->En_mp, bunch.R);
         bunch.B_gather.gather(*this->Bn_mp, bunch.R);
         auto gammabeta_view = bunch.gamma_beta.getView();
+        auto Qview = bunch.Q.getView();
         auto rview = bunch.R.getView();
         auto rnp1view = bunch.R_np1.getView();
         auto E_gatherview = bunch.E_gather.getView();
         auto B_gatherview = bunch.B_gather.getView();
         constexpr scalar e_mass = 0.5110;
-        constexpr scalar e_charge = -0.30282212088 * 10000.0;
         scalar this_dt = this->dt;
         Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
+            scalar charge = Qview(i);
             //using ::sqrt;
             const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
             
             
-            const ippl::Vector<scalar, 3> t1 = pgammabeta - e_charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
-            const scalar alpha = -e_charge * this_dt / (2 * e_mass * sqrt(1 + dot_prod(t1, t1)));
+            const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
+            const scalar alpha = -charge * this_dt / (2 * e_mass * sqrt(1 + dot_prod(t1, t1)));
             const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
 
             const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
-            const ippl::Vector<scalar, 3> ngammabeta = t3 - e_charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
+            const ippl::Vector<scalar, 3> ngammabeta = t3 - charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
 
             rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));            
         });
@@ -723,6 +724,7 @@ namespace ippl {
         (*Bn_mp) = (curl(aN_m) + curl(aNp1_m)) * 0.5;
         if(radiation){
             (*radiation) = ippl::cross(*En_mp, *Bn_mp);
+            //LOG(radiation->getView()(21, 21, 21));
         }
 
         typename FDTDSolver<Tfields, Dim, M, C>::Field_t energy_density = phiN_m.deepCopy();
@@ -743,7 +745,7 @@ namespace ippl {
             edview(i,j,k) = squaredNorm(eview(i,j,k)) + squaredNorm(bview(i,j,k));
         });
         Kokkos::fence();
-        std::cout << "E contr: " << EE * hr_m[0] * hr_m[1] * hr_m[2] << "B contr: " << BE * hr_m[0] * hr_m[1] * hr_m[2] << "\n"; 
+        //std::cout << "E contr: " << EE * hr_m[0] * hr_m[1] * hr_m[2] << "B contr: " << BE * hr_m[0] * hr_m[1] * hr_m[2] << "\n"; 
         //energy_density = (ippl::dot(*En_mp, *En_mp) + ippl::dot(*Bn_mp, *Bn_mp)) * scalar(0.5);
         this->total_energy = (EE + BE) * hr_m[0] * hr_m[1] * hr_m[2] + bunch_energy(this->bunch);
         return (EE + BE) * hr_m[0] * hr_m[1] * hr_m[2];
@@ -775,11 +777,43 @@ namespace ippl {
         constexpr scalar epsilon0 = 1.0 / (c * c * mu0);
         constexpr scalar electron_charge = 0.30282212088;
         constexpr scalar electron_mass = 0.5110;
-        bunch.create(!!!ippl::Comm->rank() * particle_count);
-        bunch.Q = electron_charge * 10000.0;
+        bunch.create(particle_count * !!!ippl::Comm->rank());
+        auto Rview = bunch.R.getView();
+        auto gbview = bunch.gamma_beta.getView();
+        typename playout_type::RegionLayout_t const& rlayout = pl.getRegionLayout();
+        typename playout_type::RegionLayout_t::view_type regions_view = rlayout.getdLocalRegions();
+        Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i){
+            (void)i;
+            size_t index = i;
+            i *= 123123ul;
+	        i ^= i << 13;
+	        i ^= i >> 7;
+	        i ^= i << 17;
+            i ^= i << 13;
+	        i ^= i >> 7;
+	        i ^= i << 17;
+            i ^= i << 13;
+	        i ^= i >> 7;
+	        i ^= i << 17;
+            double xvalue = double(i) / 1.9e19;
+            i ^= i << 13;
+	        i ^= i >> 7;
+	        i ^= i << 17;
+            double yvalue = double(i) / 1.9e19;
+            i ^= i << 13;
+	        i ^= i >> 7;
+	        i ^= i << 17;
+            double zvalue = double(i) / 1.9e19;
+            Rview(index) = ippl::Vector<scalar, 3>{xvalue, yvalue, zvalue};
+
+            gbview(index) = ippl::Vector<scalar, 3>{0.5 - xvalue, 0.5 - yvalue, 0.5 - zvalue} * 2.0;
+            //LOG("setpos to: " << (ippl::Vector<scalar, 3>{xvalue, yvalue, zvalue}));
+
+        });
+        bunch.Q = electron_charge * 1000.0;
         bunch.mass = electron_mass;
-        bunch.R = ippl::Vector<scalar, 3>(0.4);
-        bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e6, 0.0};
+        //bunch.R = ippl::Vector<scalar, 3>(0.4);
+        //bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e1, 0.0};
         bunch.R_np1 = ippl::Vector<scalar, 3>(0.3);
         // get layout and mesh
         layout_mp = &(this->rhoN_mp->getLayout());

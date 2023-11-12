@@ -27,14 +27,7 @@
 
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
-const char* from_last_slash(const char* x){
-    size_t len = strlen(x);
-    const char* end = x + len;
-    while(*(end - 1) != '/')--end;
-    return end;
-}
 
-#define LOG(X) std::cout << from_last_slash(__FILE__) << ':' << __LINE__ << ": " << X << "\n"
 template <typename _scalar, class PLayout>
 struct Bunch : public ippl::ParticleBase<PLayout> {
     using scalar = _scalar;

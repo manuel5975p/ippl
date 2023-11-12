@@ -225,6 +225,7 @@ namespace ippl {
             jcfrom -= from;
             jcto = to;
             jcto -= relay;
+            
             //std::cout << ippl::Comm->rank() << jcfrom << "   \t" << jcto << "\n";
             //std::cout << lDom.first() << "  ldf\n";
             // Calculate wlo and whi

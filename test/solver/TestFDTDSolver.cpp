@@ -27,6 +27,15 @@
 // You should have received a copy of the GNU General Public License
 // along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
+#include <cstring>
+const char* from_last_slash(const char* x){
+    size_t len = std::strlen(x);
+    const char* end = x + len;
+    while(*(end - 1) != '/')--end;
+    return end;
+}
+
+#define LOG(X) std::cout << from_last_slash(__FILE__) << ':' << __LINE__ << ": " << X << "\n"
 #include <iostream>
 #include <quadmath.h>
 #define gqf(X) __float128 X(__float128 x)noexcept{ \
@@ -290,8 +299,9 @@ Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_val
     if(!ippl::Comm->rank()){
         size_t ts = 0;
         for(auto fs : field_sizes)ts += fs;
-        std::cout << "Total: " << ts << "\n";
+        //LOG("Total: " << ts);
     }
+    
     //std::cout << "ag" << std::endl;
     typename Kokkos::View<view_value_type*>::host_mirror_type hmirror = Kokkos::create_mirror_view(src_view);
     std::vector<view_value_type> local_view_dump(local_field_size);
@@ -622,7 +632,7 @@ int main(int argc, char* argv[]) {
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
                     //std::cout << x << " x\n";
-                    ret[2] = 0.1 * gauss(ippl::Vector<scalar, 3> {x,0.5,0.5}, 0.5, 0.08);
+                    //ret[2] = -1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.15);
                     //(void)x;
                     //(void)y;
                     //(void)z;
@@ -636,13 +646,14 @@ int main(int argc, char* argv[]) {
         //std::cout << solver.total_energy << "\n";
         solver.solve();
         std::cout.precision(10);
-        std::cout << "initial: " << solver.total_energy << "\n";
+        LOG("After first step: " << solver.total_energy);
         //goto exit;
         //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         std::vector<scalar> energies;
         for (unsigned int it = 1; it < iterations; ++it) {
-            LOG("Timestep number: " << it);
+            if(ippl::Comm->rank() == 0)
+                LOG("Timestep number: " << it);
             //msg << "Timestep number = " << it << " , time = " << it * dt << endl;
 
             if (!seed) {
@@ -654,13 +665,13 @@ int main(int argc, char* argv[]) {
             }
 
             solver.solve();
-            std::cout << solver.total_energy << "\n";
+            //std::cout << solver.total_energy << "\n";
             //if(it > iterations / 6)
             energies.push_back(solver.total_energy);
             
             //
-            
-            dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            if(it % 10 == 0)
+                dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //if(it == iterations / 2){
             //    dumpPOV(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //}
