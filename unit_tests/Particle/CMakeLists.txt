@@ -14,8 +14,16 @@ link_directories (
 )
 
 add_executable (ParticleBase ParticleBase.cpp)
+add_executable (ZigZag ZigZag.cpp)
+
 target_link_libraries (
     ParticleBase
+    ippl
+    ${MPI_CXX_LIBRARIES}
+    ${GTEST_BOTH_LIBRARIES}
+)
+target_link_libraries (
+    ZigZag
     ippl
     ${MPI_CXX_LIBRARIES}
     ${GTEST_BOTH_LIBRARIES}

@@ -201,7 +201,6 @@ namespace ippl {
         const int nghost               = f.getNghost();
 
         using policy_type = Kokkos::RangePolicy<execution_space>;
-
         Kokkos::parallel_for(
             "ParticleAttrib::scatter", policy_type(0, *(this->localNum_mp)),
             KOKKOS_CLASS_LAMBDA(const size_t idx) {
@@ -210,6 +209,9 @@ namespace ippl {
                 vector_type to                   = (pp2(idx) - origin);
 
                 //val is charge (or other quantity)
+                if(ippl::Comm->rank() == 0){
+                    //std::cout << idx << ": Depositing " << from << " to " << to << "\n";
+                }
                 const value_type& val = dview_m(idx);
                 detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, val * dt_scale, lDom, nghost);
             });
@@ -260,7 +262,7 @@ namespace ippl {
                 Vector<T, Field::dim> wlo     = 1.0 - whi;
 
                 Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
-
+                
                 // gather
                 dview_m(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},
                                                        view, wlo, whi, args);

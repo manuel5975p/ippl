@@ -94,7 +94,7 @@ namespace ippl {
 
         // constructor and destructor
         FDTDSolver(Field_t* charge, VField_t* current, VField_t* E, VField_t* B,
-                   scalar timestep = 0.05, VField_t* radiation = nullptr, bool seed_ = false);
+                   scalar timestep, size_t pcount, VField_t* radiation = nullptr, bool seed_ = false);
         ~FDTDSolver();
 
         // finite differences time domain solver for potentials (A and phi)
@@ -109,6 +109,8 @@ namespace ippl {
         // initialization of FDTD solver
         void initialize();
 
+        template<typename callable>
+        void apply_to_fields(callable c);
         template<typename callable>
         void fill_initialcondition(callable c);
         template<typename callable>

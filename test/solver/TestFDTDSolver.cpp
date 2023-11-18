@@ -37,12 +37,18 @@ const char* from_last_slash(const char* x){
 
 #define LOG(X) std::cout << from_last_slash(__FILE__) << ':' << __LINE__ << ": " << X << "\n"
 #include <iostream>
-#include <quadmath.h>
+#define FRAST3D_IMPLEMENTATION
+#include "rast3d.hpp"
+//#include <quadmath.h>
 #define gqf(X) __float128 X(__float128 x)noexcept{ \
     return X##q(x);\
 }
 namespace Kokkos{
-gqf(sqrt);
+
+
+
+
+/*gqf(sqrt);
 gqf(sin);
 gqf(floor);
 gqf(cos);
@@ -56,9 +62,11 @@ __float128 min(__float128 x, __float128 y)noexcept{
 }
 std::ostream& operator<<(std::ostream& ostr, __float128 x){
     return ostr << (double)x;
-}
+}*/
 #include "Ippl.h"
-
+#include <Kokkos_MathematicalConstants.hpp>
+#include <Kokkos_MathematicalFunctions.hpp>
+#include <Kokkos_Random.hpp>
 #include <cstdlib>
 #include <decl/Kokkos_Declare_OPENMP.hpp>
 #include <fstream>
@@ -68,7 +76,17 @@ std::ostream& operator<<(std::ostream& ostr, __float128 x){
 #include "Particle/ParticleAttrib.h"
 #include "Solver/FDTDSolver.h"
 
-
+constexpr double turbo_cm[256][3] = {  {0.18995,0.07176,0.23217},  {0.19483,0.08339,0.26149},  {0.19956,0.09498,0.29024},  {0.20415,0.10652,0.31844},  {0.20860,0.11802,0.34607},  {0.21291,0.12947,0.37314},  {0.21708,0.14087,0.39964},  {0.22111,0.15223,0.42558},  {0.22500,0.16354,0.45096},  {0.22875,0.17481,0.47578},  {0.23236,0.18603,0.50004},  {0.23582,0.19720,0.52373},  {0.23915,0.20833,0.54686},  {0.24234,0.21941,0.56942},  {0.24539,0.23044,0.59142},  {0.24830,0.24143,0.61286},  {0.25107,0.25237,0.63374},  {0.25369,0.26327,0.65406},  {0.25618,0.27412,0.67381},  {0.25853,0.28492,0.69300},  {0.26074,0.29568,0.71162},  {0.26280,0.30639,0.72968},  {0.26473,0.31706,0.74718},  {0.26652,0.32768,0.76412},  {0.26816,0.33825,0.78050},  {0.26967,0.34878,0.79631},  {0.27103,0.35926,0.81156},  {0.27226,0.36970,0.82624},  {0.27334,0.38008,0.84037},  {0.27429,0.39043,0.85393},  {0.27509,0.40072,0.86692},  {0.27576,0.41097,0.87936},  {0.27628,0.42118,0.89123},  {0.27667,0.43134,0.90254},  {0.27691,0.44145,0.91328},  {0.27701,0.45152,0.92347},  {0.27698,0.46153,0.93309},  {0.27680,0.47151,0.94214},  {0.27648,0.48144,0.95064},  {0.27603,0.49132,0.95857},  {0.27543,0.50115,0.96594},  {0.27469,0.51094,0.97275},  {0.27381,0.52069,0.97899},  {0.27273,0.53040,0.98461},  {0.27106,0.54015,0.98930},  {0.26878,0.54995,0.99303},  {0.26592,0.55979,0.99583},  {0.26252,0.56967,0.99773},  {0.25862,0.57958,0.99876},  {0.25425,0.58950,0.99896},  {0.24946,0.59943,0.99835},  {0.24427,0.60937,0.99697},  {0.23874,0.61931,0.99485},  {0.23288,0.62923,0.99202},  {0.22676,0.63913,0.98851},  {0.22039,0.64901,0.98436},  {0.21382,0.65886,0.97959},  {0.20708,0.66866,0.97423},  {0.20021,0.67842,0.96833},  {0.19326,0.68812,0.96190},  {0.18625,0.69775,0.95498},  {0.17923,0.70732,0.94761},  {0.17223,0.71680,0.93981},  {0.16529,0.72620,0.93161},  {0.15844,0.73551,0.92305},  {0.15173,0.74472,0.91416},  {0.14519,0.75381,0.90496},  {0.13886,0.76279,0.89550},  {0.13278,0.77165,0.88580},  {0.12698,0.78037,0.87590},  {0.12151,0.78896,0.86581},  {0.11639,0.79740,0.85559},  {0.11167,0.80569,0.84525},  {0.10738,0.81381,0.83484},  {0.10357,0.82177,0.82437},  {0.10026,0.82955,0.81389},  {0.09750,0.83714,0.80342},  {0.09532,0.84455,0.79299},  {0.09377,0.85175,0.78264},  {0.09287,0.85875,0.77240},  {0.09267,0.86554,0.76230},  {0.09320,0.87211,0.75237},  {0.09451,0.87844,0.74265},  {0.09662,0.88454,0.73316},  {0.09958,0.89040,0.72393},  {0.10342,0.89600,0.71500},  {0.10815,0.90142,0.70599},  {0.11374,0.90673,0.69651},  {0.12014,0.91193,0.68660},  {0.12733,0.91701,0.67627},  {0.13526,0.92197,0.66556},  {0.14391,0.92680,0.65448},  {0.15323,0.93151,0.64308},  {0.16319,0.93609,0.63137},  {0.17377,0.94053,0.61938},  {0.18491,0.94484,0.60713},  {0.19659,0.94901,0.59466},  {0.20877,0.95304,0.58199},  {0.22142,0.95692,0.56914},  {0.23449,0.96065,0.55614},  {0.24797,0.96423,0.54303},  {0.26180,0.96765,0.52981},  {0.27597,0.97092,0.51653},  {0.29042,0.97403,0.50321},  {0.30513,0.97697,0.48987},  {0.32006,0.97974,0.47654},  {0.33517,0.98234,0.46325},  {0.35043,0.98477,0.45002},  {0.36581,0.98702,0.43688},  {0.38127,0.98909,0.42386},  {0.39678,0.99098,0.41098},  {0.41229,0.99268,0.39826},  {0.42778,0.99419,0.38575},  {0.44321,0.99551,0.37345},  {0.45854,0.99663,0.36140},  {0.47375,0.99755,0.34963},  {0.48879,0.99828,0.33816},  {0.50362,0.99879,0.32701},  {0.51822,0.99910,0.31622},  {0.53255,0.99919,0.30581},  {0.54658,0.99907,0.29581},  {0.56026,0.99873,0.28623},  {0.57357,0.99817,0.27712},  {0.58646,0.99739,0.26849},  {0.59891,0.99638,0.26038},  {0.61088,0.99514,0.25280},  {0.62233,0.99366,0.24579},  {0.63323,0.99195,0.23937},  {0.64362,0.98999,0.23356},  {0.65394,0.98775,0.22835},  {0.66428,0.98524,0.22370},  {0.67462,0.98246,0.21960},  {0.68494,0.97941,0.21602},  {0.69525,0.97610,0.21294},  {0.70553,0.97255,0.21032},  {0.71577,0.96875,0.20815},  {0.72596,0.96470,0.20640},  {0.73610,0.96043,0.20504},  {0.74617,0.95593,0.20406},  {0.75617,0.95121,0.20343},  {0.76608,0.94627,0.20311},  {0.77591,0.94113,0.20310},  {0.78563,0.93579,0.20336},  {0.79524,0.93025,0.20386},  {0.80473,0.92452,0.20459},  {0.81410,0.91861,0.20552},  {0.82333,0.91253,0.20663},  {0.83241,0.90627,0.20788},  {0.84133,0.89986,0.20926},  {0.85010,0.89328,0.21074},  {0.85868,0.88655,0.21230},  {0.86709,0.87968,0.21391},  {0.87530,0.87267,0.21555},  {0.88331,0.86553,0.21719},  {0.89112,0.85826,0.21880},  {0.89870,0.85087,0.22038},  {0.90605,0.84337,0.22188},  {0.91317,0.83576,0.22328},  {0.92004,0.82806,0.22456},  {0.92666,0.82025,0.22570},  {0.93301,0.81236,0.22667},  {0.93909,0.80439,0.22744},  {0.94489,0.79634,0.22800},  {0.95039,0.78823,0.22831},  {0.95560,0.78005,0.22836},  {0.96049,0.77181,0.22811},  {0.96507,0.76352,0.22754},  {0.96931,0.75519,0.22663},  {0.97323,0.74682,0.22536},  {0.97679,0.73842,0.22369},  {0.98000,0.73000,0.22161},  {0.98289,0.72140,0.21918},  {0.98549,0.71250,0.21650},  {0.98781,0.70330,0.21358},  {0.98986,0.69382,0.21043},  {0.99163,0.68408,0.20706},  {0.99314,0.67408,0.20348},  {0.99438,0.66386,0.19971},  {0.99535,0.65341,0.19577},  {0.99607,0.64277,0.19165},  {0.99654,0.63193,0.18738},  {0.99675,0.62093,0.18297},  {0.99672,0.60977,0.17842},  {0.99644,0.59846,0.17376},  {0.99593,0.58703,0.16899},  {0.99517,0.57549,0.16412},  {0.99419,0.56386,0.15918},  {0.99297,0.55214,0.15417},  {0.99153,0.54036,0.14910},  {0.98987,0.52854,0.14398},  {0.98799,0.51667,0.13883},  {0.98590,0.50479,0.13367},  {0.98360,0.49291,0.12849},  {0.98108,0.48104,0.12332},  {0.97837,0.46920,0.11817},  {0.97545,0.45740,0.11305},  {0.97234,0.44565,0.10797},  {0.96904,0.43399,0.10294},  {0.96555,0.42241,0.09798},  {0.96187,0.41093,0.09310},  {0.95801,0.39958,0.08831},  {0.95398,0.38836,0.08362},  {0.94977,0.37729,0.07905},  {0.94538,0.36638,0.07461},  {0.94084,0.35566,0.07031},  {0.93612,0.34513,0.06616},  {0.93125,0.33482,0.06218},  {0.92623,0.32473,0.05837},  {0.92105,0.31489,0.05475},  {0.91572,0.30530,0.05134},  {0.91024,0.29599,0.04814},  {0.90463,0.28696,0.04516},  {0.89888,0.27824,0.04243},  {0.89298,0.26981,0.03993},  {0.88691,0.26152,0.03753},  {0.88066,0.25334,0.03521},  {0.87422,0.24526,0.03297},  {0.86760,0.23730,0.03082},  {0.86079,0.22945,0.02875},  {0.85380,0.22170,0.02677},  {0.84662,0.21407,0.02487},  {0.83926,0.20654,0.02305},  {0.83172,0.19912,0.02131},  {0.82399,0.19182,0.01966},  {0.81608,0.18462,0.01809},  {0.80799,0.17753,0.01660},  {0.79971,0.17055,0.01520},  {0.79125,0.16368,0.01387},  {0.78260,0.15693,0.01264},  {0.77377,0.15028,0.01148},  {0.76476,0.14374,0.01041},  {0.75556,0.13731,0.00942},  {0.74617,0.13098,0.00851},  {0.73661,0.12477,0.00769},  {0.72686,0.11867,0.00695},  {0.71692,0.11268,0.00629},  {0.70680,0.10680,0.00571},  {0.69650,0.10102,0.00522},  {0.68602,0.09536,0.00481},  {0.67535,0.08980,0.00449},  {0.66449,0.08436,0.00424},  {0.65345,0.07902,0.00408},  {0.64223,0.07380,0.00401},  {0.63082,0.06868,0.00401},  {0.61923,0.06367,0.00410},  {0.60746,0.05878,0.00427},  {0.59550,0.05399,0.00453},  {0.58336,0.04931,0.00486},  {0.57103,0.04474,0.00529},  {0.55852,0.04028,0.00579},  {0.54583,0.03593,0.00638},  {0.53295,0.03169,0.00705},  {0.51989,0.02756,0.00780},  {0.50664,0.02354,0.00863},  {0.49321,0.01963,0.00955},  {0.47960,0.01583,0.01055} };
+inline Color jet(double t){
+    Color ret;
+    int index = t * 256;
+    index = std::min(std::max(index, 0), 255);
+    ret.x = turbo_cm[index][0] * 255.0;
+    ret.y = turbo_cm[index][1] * 255.0;
+    ret.z = turbo_cm[index][2] * 255.0;
+    ret.w = 255;
+    return ret;
+}
 template<typename T, typename R>
 KOKKOS_INLINE_FUNCTION auto sine(T n, R dt) {
     using Kokkos::sin;
@@ -95,6 +113,39 @@ KOKKOS_INLINE_FUNCTION auto gauss(ippl::Vector<T1, Dim> x, T2 mean, T3 stddev) {
     }
     return exp(-accum / (stddev * stddev));
 }
+template <typename T, class GeneratorPool, unsigned Dim>
+struct generate_random {
+    using view_type  = typename ippl::detail::ViewType<T, 1>::view_type;
+    using value_type = typename T::value_type;
+    // Output View for the random numbers
+    view_type Rview, GBview;
+    ippl::NDRegion<value_type, Dim> inside;
+    // The GeneratorPool
+    GeneratorPool rand_pool;
+
+    // Initialize all members
+    generate_random(view_type x_, view_type v_, ippl::NDRegion<value_type, Dim> reg, GeneratorPool rand_pool_)
+        :Rview(x_)
+        ,GBview(v_)
+        ,inside(reg)
+        ,rand_pool(rand_pool_){}
+
+    KOKKOS_INLINE_FUNCTION void operator()(const size_t i) const {
+        // Get a random number state from the pool for the active thread
+        typename GeneratorPool::generator_type rand_gen = rand_pool.get_state();
+
+        value_type u;
+        for (unsigned d = 0; d < Dim; ++d) {
+            
+            Rview(i)[d] = (inside[d].min()+inside[d].max()) * 0.5;//rand_gen.drand(inside[d].min(),inside[d].max());
+            GBview(i)[d] = rand_gen.drand(-100.0,100.0);
+            GBview(i)[d] /= Kokkos::abs(GBview(i)[d]);
+        }
+
+        // Give the state back, which will allow another thread to acquire it
+        rand_pool.free_state(rand_gen);
+    }
+};
 template<typename T, unsigned Dim>
 std::string povstring(const ippl::Vector<T, Dim>& v){
     std::stringstream sstr;
@@ -503,41 +554,14 @@ int main(int argc, char* argv[]) {
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
         const scalar c = 1.0;  // 299792458.0;
-        scalar dt      = std::min({dx, dy, dz}) * 0.25 / c;
+        scalar dt      = std::min({dx, dy, dz}) * 0.125 / c;
         unsigned int iterations = std::ceil((double)(time_simulated / dt));
         dt = time_simulated / (scalar)iterations;
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
-        if(false){
-            Field_t halo_test_field;
 
-            halo_test_field.initialize(mesh, layout);
-
-            auto _tv = halo_test_field.getView();   
-            const scalar ronk = ippl::Comm->rank();
-            Kokkos::parallel_for(halo_test_field.getFieldRangePolicy(), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
-                _tv(i, j, k) = ronk;
-            });
-            Kokkos::fence();
-            if(ippl::Comm->rank() == 0){
-                std::cout << "BV: " << _tv(5, 5, _tv.extent(0) - 1) << "\n";
-            }
-            ippl::Comm->barrier();
-            halo_test_field.fillHalo();
-            Kokkos::fence();
-            if(ippl::Comm->rank() == 0){
-                std::cout << "BV: " << _tv(5, 5, _tv.extent(0) - 1) << "\n";
-            }
-        }
         //Define particle layout and bunch
         
-        //bunch.create(100);
-        //bunch.setParticleBC(ippl::NO);
-        //bunch.Q = 1.0;
-        //bunch.R = 0.5 + hr[0] * 0.5;
-        //std::cout << bunch.R.getView()(0) << "\n";
-        //std::cout << bunch.Q.getView()(0) << "\n";
-        //std::cin.get();
 
         // define the R (rho) field
         Field_t rho;
@@ -548,77 +572,63 @@ int main(int argc, char* argv[]) {
         fieldB.initialize(mesh, layout);
         fieldE = 0.0;
         fieldB = 0.0;
-
+        
         // define current = 0
         VField_t current;
         current.initialize(mesh, layout);
         VField_t radiation;
         radiation.initialize(mesh, layout);
         
-        //std::stringstream sstr;
-        //sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[0].first() << " to " << current.getLayout().getLocalNDIndex()[0].last() << "\n";
-        //sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[1].first() << " to " << current.getLayout().getLocalNDIndex()[1].last() << "\n";
-        //sstr << ippl::Comm->rank() << ": " << current.getLayout().getLocalNDIndex()[2].first() << " to " << current.getLayout().getLocalNDIndex()[2].last() << "\n";
-        //std::cout << sstr.str() << std::endl;
-        //return 0;
         current = 0.0;
 
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
         bool seed = false;
 
         // define an FDTDSolver object
-        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, &radiation,seed);
+        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, /*Particle count*/ 0, &radiation,seed);
+        
         using s_t = ippl::FDTDSolver<scalar, Dim>;
-        s_t::VField_t::BConds_t all_periodic;
-        s_t::Field_t::BConds_t all_periodics;
-        auto bcsetter_single = [&all_periodic, &all_periodics, hr, dt]<size_t Idx>(const std::index_sequence<Idx>& seq){
-            //all_periodic [Idx] = std::make_shared<ippl::MurABC1st<s_t::VField_t, Idx>>(Idx, hr, 1.0, dt);
-            //all_periodics[Idx] = std::make_shared<ippl::MurABC1st<s_t::Field_t , Idx>>(Idx, hr, 1.0, dt);
-            all_periodic [Idx] = std::make_shared<ippl::NoBcFace<s_t::VField_t>>(Idx);// hr, 1.0, dt);
-            all_periodics[Idx] = std::make_shared<ippl::NoBcFace<s_t::Field_t>>(Idx );// hr, 1.0, dt);
-            (void)seq;
+        s_t::VField_t::BConds_t vector_bcs;
+        s_t::Field_t::BConds_t  scalar_bcs;
+
+        typename s_t::playout_type::RegionLayout_t const& rlayout = solver.pl.getRegionLayout();
+        typename s_t::playout_type::RegionLayout_t::view_type regions_view = rlayout.gethLocalRegions();
+
+        Kokkos::Random_XorShift64_Pool<> rand_pool((size_t)(42 + 100 * ippl::Comm->rank()));
+        Kokkos::parallel_for(
+            solver.bunch.getLocalNum(),
+            generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                solver.bunch.R.getView(),
+                solver.bunch.gamma_beta.getView(),
+                regions_view(ippl::Comm->rank()),
+                rand_pool
+            )
+        );
+        auto bcsetter_single = [&vector_bcs, &scalar_bcs, hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
+            //vector_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::VField_t, Idx>>(Idx, hr, 1.0, dt);
+            //scalar_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::Field_t , Idx>>(Idx, hr, 1.0, dt);
+            vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::VField_t>>(Idx);
+            scalar_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t:: Field_t>>(Idx);
             return 0;
         };
-        auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>& seq){
+        auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
             int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
-            (void)seq;
             (void) x;
         };
         bcsetter(std::make_index_sequence<Dim * 2>{});
-        solver.aN_m.setFieldBC(all_periodic);
-        solver.aNp1_m.setFieldBC(all_periodic);
-        solver.aNm1_m.setFieldBC(all_periodic);
-        solver.phiN_m.setFieldBC(all_periodics);
-        solver.phiNp1_m.setFieldBC(all_periodics);
-        solver.phiNm1_m.setFieldBC(all_periodics);
-
-        //if(!ippl::Comm->rank()){
-        //    std::cout << solver.aN_m.getLayout().getDomain().last() << "\n";
-        //}
-        //return 0;
-        
-        //solver.bconds[0] = ippl::NO_FACE;
-        //solver.bconds[1] = ippl::NO_FACE;
-        //solver.bconds[2] = ippl::NO_FACE;
+        solver.aN_m.setFieldBC(vector_bcs);
+        solver.aNp1_m.setFieldBC(vector_bcs);
+        solver.aNm1_m.setFieldBC(vector_bcs);
+        solver.phiN_m.setFieldBC(scalar_bcs);
+        solver.phiNp1_m.setFieldBC(scalar_bcs);
+        solver.phiNm1_m.setFieldBC(scalar_bcs);
+        solver.bunch.setParticleBC(ippl::NO);
         
         solver.bconds[0] = ippl::MUR_ABC_1ST;
         solver.bconds[1] = ippl::MUR_ABC_1ST;
         solver.bconds[2] = ippl::MUR_ABC_1ST;
-        decltype(solver)::bunch_type bunch_buffer(solver.pl);
-        solver.pl.update(solver.bunch, bunch_buffer);
-
-        /*
-        std::cout << nr[0] << " " << current.getView().extent(0) << "\n";
-        std::cout << nr[1] << " " << current.getView().extent(1) << "\n";
-        std::cout << nr[2] << " " << current.getView().extent(2) << "\n";
-        std::cout << nr[0] << " " << solver.aN_m.getView().extent(0) << "\n";
-        std::cout << nr[1] << " " << solver.aN_m.getView().extent(1) << "\n";
-        std::cout << nr[2] << " " << solver.aN_m.getView().extent(2) << "\n";
-        return 0;
-        */
-        //bunch.Q.scatter(rho, bunch.R);
-        //std::cout << rho.getView()(nr[0] / 2, nr[1] / 2, nr[2] / 2) << "\n";
-        //std::cin.get();
+        //decltype(solver)::bunch_type bunch_buffer(solver.pl);
+        //solver.pl.update(solver.bunch, bunch_buffer);
         if (!seed) {
 
             // add pulse at center of domain
@@ -632,13 +642,14 @@ int main(int argc, char* argv[]) {
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
                     //std::cout << x << " x\n";
-                    //ret[2] = -1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.15);
-                    //(void)x;
-                    //(void)y;
-                    //(void)z;
+                    ret[2] = -1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.2}, 0.2, 0.05);
+                    (void)x;
+                    (void)y;
+                    (void)z;
                     return ret;
             });
         }
+        
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
         //solver.aN_m.setFieldBC()
         //dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
@@ -651,6 +662,10 @@ int main(int argc, char* argv[]) {
         //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         std::vector<scalar> energies;
+        constexpr unsigned int ww = 1280, wh = 720;
+        InitWindow(ww, wh);
+        
+        Mesh sphere_mesh = GenMeshSphere(0.3f, 12, 12);
         for (unsigned int it = 1; it < iterations; ++it) {
             if(ippl::Comm->rank() == 0)
                 LOG("Timestep number: " << it);
@@ -669,9 +684,122 @@ int main(int argc, char* argv[]) {
             //if(it > iterations / 6)
             energies.push_back(solver.total_energy);
             
-            //
-            if(it % 10 == 0)
-                dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+            if(true || it % 10 == 0){
+                Vector3<float> campos{(float)(-150.0 * std::cos(7.0 * (it * dt))), float(80.0 * (it * dt)), (float)(-150.0 * std::sin(7.0 * (it * dt)))};
+                Vector3<float> center{nr[0] / 2.0f, nr[1] / 2.0f, nr[2] / 2.0f};
+                Vector3<float> look = center - campos;
+                
+                camera cam(campos, look);
+                //LOG(look << "\n");
+                //LOG(cam.look_dir() << "\n");
+                matrix_stack.push(cam.matrix(ww, wh));
+                ClearBackground(Color{0, 15, 20, 255});
+                auto bview = fieldB.getView();
+                auto bunch_r_view = solver.bunch.R.getView();
+                scalar maxnorm = -1.0;
+                Kokkos::parallel_reduce(ippl::getRangePolicy(fieldB.getView()), KOKKOS_LAMBDA(size_t i, size_t j, size_t k, scalar& ref){
+                    ippl::Vector<scalar, 3> bv = bview(i, j, k);
+                    using Kokkos::max;
+                    ref = max(bv.norm(), ref);
+                }, maxnorm);
+                scalar maxnorm_ar = -1.0;
+                MPI_Allreduce(&maxnorm, &maxnorm_ar, 1, MPI_DOUBLE, MPI_MAX, ippl::Comm->getCommunicator());
+                //DrawBillboardLineEx(Vector3<float>{0,0,0}, Vector3<float>{0,1,0}, 0.05f, Color{255,255,0,255});
+                auto lindex_lower = solver.layout_mp->getLocalNDIndex().first();
+                auto lindex_upper = solver.layout_mp->getLocalNDIndex().last();
+                constexpr float lt = 0.01;
+                int rankm3 = ippl::Comm->rank() % 8;
+                Color lc{
+                    (unsigned char)((rankm3 & 1) * 255),
+                    (unsigned char)(((rankm3 >> 1) & 1) * 255),
+                    (unsigned char)(((rankm3 >> 2) & 1) * 255), 255
+                };
+
+                auto ld = [lindex_lower, lindex_upper, lt](int xo, int yo, int zo, int xo2, int yo2, int zo2, Color lc){
+                    ippl::Vector<int, 3U> v[2] = {lindex_lower, lindex_upper};
+                    DrawBillboardLineEx(
+                        Vector3<float>{(float)v[xo][0]  + !!xo ,(float)v[yo][1]  + !!yo, (float)v[zo][2]  + !!zo},
+                        Vector3<float>{(float)v[xo2][0] + !!xo2,(float)v[yo2][1] + !!yo2,(float)v[zo2][2] + !!zo2}, lt, lc
+                    );
+                };
+                //Draw local cube wireframe
+                ld(0,0,0,1,0,0,lc);
+                ld(0,0,0,0,1,0,lc);
+                ld(0,0,0,0,0,1,lc);
+                ld(1,0,0,1,1,0,lc);
+                ld(1,0,0,1,0,1,lc);
+                ld(0,1,0,1,1,0,lc);
+                ld(0,1,0,0,1,1,lc);
+                ld(0,0,1,0,1,1,lc);
+                ld(0,0,1,1,0,1,lc);
+                ld(1,1,0,1,1,1,lc);
+                ld(1,0,1,1,1,1,lc);
+                ld(0,1,1,1,1,1,lc);
+
+                Kokkos::parallel_for(ippl::getRangePolicy(fieldB.getView()), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+                    ippl::Vector<scalar, 3> bv = bview(i, j, k) * (scalar(10.0) / maxnorm_ar);
+                    i += lindex_lower[0];
+                    j += lindex_lower[1];
+                    k += lindex_lower[2];
+                    DrawBillboardLineEx(Vector3<float>{(float)i,(float)j,(float)k}, Vector3<float>{(float)(i + bv[0]),(float)(j + bv[1]),(float)(k + bv[2])}, 0.01f, jet(bv.norm()));
+                });
+                Kokkos::parallel_for(solver.bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i){
+                    ippl::Vector<scalar, 3> bv = bunch_r_view(i);
+                    Matrix4<float> trf(1.0);
+                    trf[12] = bv[0] / hr[0] + 1.5;
+                    trf[13] = bv[1] / hr[1] + 1.5;
+                    trf[14] = bv[2] / hr[2] + 1.5;
+                    DrawMesh(sphere_mesh, trf); 
+                });
+
+                {
+                    int size = ippl::Comm->size();
+                    int rank = ippl::Comm->rank();
+                    for (int stride = 1; stride < size; stride *= 2) {
+                        if (rank % (2 * stride) == 0) {
+                            int partner = rank + stride;
+                            if (partner < size) {
+                                // Receive data from partner
+                                framebuffer received(current_fb->resolution.x, current_fb->resolution.y);
+                                MPI_Recv(
+                                    received.color_buffer.data.get(), 
+                                    received.color_buffer.width * received.color_buffer.height * sizeof(framebuffer::color_t),
+                                    MPI_BYTE, partner, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+                                );
+                                MPI_Recv(
+                                    received.depth_buffer.data.get(), 
+                                    received.depth_buffer.width * received.color_buffer.height * sizeof(framebuffer::depth_t),
+                                    MPI_BYTE, partner, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+                                );
+                                // Update localArray using the reduction function
+                                depthblend_framebuffers(*current_fb, received);
+                            }
+                        } else {
+                            int partner = rank - stride;
+                            // Send data to partner
+                            MPI_Send(
+                                current_fb->color_buffer.data.get(),
+                                current_fb->resolution.x * current_fb->resolution.y * sizeof(framebuffer::color_t),
+                                MPI_BYTE, partner, 0, MPI_COMM_WORLD
+                            );
+                            MPI_Send(
+                                current_fb->depth_buffer.data.get(),
+                                current_fb->resolution.x * current_fb->resolution.y * sizeof(framebuffer::depth_t),
+                                MPI_BYTE, partner, 1, MPI_COMM_WORLD
+                            );
+                            break;  // Break to avoid participating in further communication in this iteration
+                        }
+                    }
+                    if(rank == 0){
+                        std::string fn = std::to_string(it + 1);
+                        while(fn.size() < 4)fn = '0' + fn;
+                        outputPNG(*current_fb, "iout" + fn + ".png");
+
+                    }
+                    //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
+                }
+                matrix_stack.pop();
+            }
             //if(it == iterations / 2){
             //    dumpPOV(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
             //}
@@ -694,35 +822,7 @@ int main(int argc, char* argv[]) {
             //Kokkos::View<double***> energy_density("Energies", view_a.extent(0), view_a.extent(1),
             //                                   view_a.extent(2));
         
-            scalar error_accumulation = 0.0;
-            //const double volume = (1.0 / (nr[0] - 6)) * (1.0 / (nr[1] - 6)) * (1.0 / (nr[2] - 6));
-            /*Kokkos::parallel_reduce(
-                "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, 3),
-                KOKKOS_LAMBDA(const int i, const int j, const int k, double& ref) {
-                    const int ig = i + ldom[0].first() - nghost;
-                    const int jg = j + ldom[1].first() - nghost;
-                    const int kg = k + ldom[2].first() - nghost;
-
-                    // define the physical points (cell-centered)
-                    double x = (ig + 0.5) * hr[0] + origin[0];
-                    double y = (jg + 0.5) * hr[1] + origin[1];
-                    double z = (kg + 0.5) * hr[2] + origin[2];
-                    //std::cout << std::to_string(y) + " " + std::to_string(gauss(y, 0.5, 0.25)) + "\n";
-                    if(i > 0 && j > 0 && k > 0 && i < view_a.extent(0) - 1 && j < view_a.extent(1) - 1 && k < view_a.extent(2) - 1){
-                        //ref += (dot_prod(view_b(i, j, k), view_b(i, j, k)) + dot_prod(view_e(i, j, k), view_e(i, j, k))) * volume;
-                        ref += std::abs(view_a(i, j, k)[2]) * volume;
-                        //ref += std::abs(view_a(i, j, k)[2] - gauss(y, 0.5, 0.1)) * volume;
-                        //view_an1(i, j, k)[2] - gauss(y, 0.5, 0.1);
-                    }
-                    (void)x;
-                    (void)y;
-                    (void)z;
-                    //if ((x == 0.5) && (y == 0.5) && (z == 0.5)){}
-                    //if(jg == nr[1] - 2){
-                        //view_rho(i, j, k) = sine(0, dt);
-                    //}
-            }, error_accumulation);*/
-            //error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z){
+            //scalar error_accumulation = solver.volumetric_integral(KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z){
             //    return std::abs(view_a(i, j, k)[2] - gauss(/*std::hypot(x - 0.5, y - 0.5, z - 0.5)*/ y - 0.5, 0.0, 0.1));
             //    (void)i;(void)x;
             //    (void)j;(void)y;

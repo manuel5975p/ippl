@@ -125,7 +125,7 @@ namespace ippl {
             // device code cannot throw exceptions, but we need a
             // dummy return to silence the warning
         }
-
+                                            /* Index is in [0, Dim[  */
         template <unsigned long ScatterPoint, unsigned long... Index, typename T, unsigned Dim,
                   typename IndexType>
         KOKKOS_INLINE_FUNCTION constexpr int zigzag_scatterToPoint(
@@ -135,8 +135,18 @@ namespace ippl {
             const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale) {
             //std::cout << args[0] << " " << args[1] << " " << args[2] << std::endl;
             //assert(((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...));
-            if(!((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...))
+            bool isinbound = true;
+            
+            ippl::Vector<IndexType, Dim> index3{zigzag_interpolationIndex<ScatterPoint, Index>(args)...};
+            for(unsigned int d = 0; d < Dim;d++){
+                isinbound &= (index3[d] < view.extent(d));
+            }
+            if(!isinbound){
+                //if(ippl::Comm->rank() == 0){
+                //    std::cout << "scatter cancelled!!\n";
+                //}
                 return 0;
+            }
             typename ippl::detail::ViewType<ippl::Vector<T, Dim>,
                                             Dim>::view_type::value_type::value_type* destptr =
                 &(view(zigzag_interpolationIndex<ScatterPoint, Index>(args)...)[0]);
@@ -202,9 +212,15 @@ namespace ippl {
                 fromi[i] = floor(from_in_grid_coordinates[i]) + nghost;
                 toi[i]   = floor(to_in_grid_coordinates[i])   + nghost;
             }
+            
             ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
             ippl::Vector<IndexType, Dim> toi_local = toi - lDom.first();
-
+            /*if(ippl::Comm->rank() == 0){
+                ippl::Vector<IndexType, Dim> extentvec{view.extent(0), view.extent(1), view.extent(2)};
+                LOG(extentvec);
+                LOG(fromi_local);
+                LOG(toi_local << "\n\n");
+            }*/
             // Calculate the relay point for each dimension
             ippl::Vector<T, Dim> relay;
             for (unsigned int i = 0; i < Dim; i++) {

@@ -265,7 +265,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t* charge, VField_t* current, VField_t* E,
-                                               VField_t* B, scalar timestep, VField_t* rad, bool seed_) : radiation(rad), pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(8) {
+                                               VField_t* B, scalar timestep, size_t pcount, VField_t* rad, bool seed_) : radiation(rad), pl(charge->getLayout(), charge->get_mesh()), bunch(pl), particle_count(pcount) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = charge;
@@ -559,108 +559,36 @@ namespace ippl {
                                     //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                                 }
                             }
-                        return;
-                        //}
-                        // boundary values: 1st order Absorbing Boundary Conditions
-                        bool isXmin = ((ig == 0) && (jg > 0) && (kg > 0) && (jg < nr_m[1] - 1)
-                                       && (kg < nr_m[2] - 1));
-                        scalar xmin =
-                            beta0[0] * (view_aNm1(i, j, k)[gd] + view_aNp1(i + 1, j, k)[gd])
-                            + beta1[0] * (view_aN(i, j, k)[gd] + view_aN(i + 1, j, k)[gd])
-                            + beta2[0] * (view_aNm1(i + 1, j, k)[gd]);
-                        bool isYmin = ((ig > 0) && (jg == 0) && (kg > 0) && (ig < nr_m[0] - 1)
-                                       && (kg < nr_m[2] - 1));
-                        scalar ymin =
-                            beta0[1] * (view_aNm1(i, j, k)[gd] + view_aNp1(i, j + 1, k)[gd])
-                            + beta1[1] * (view_aN(i, j, k)[gd] + view_aN(i, j + 1, k)[gd])
-                            + beta2[1] * (view_aNm1(i, j + 1, k)[gd]);
-                        bool isZmin = ((ig > 0) && (jg > 0) && (kg == 0) && (ig < nr_m[0] - 1)
-                                       && (jg < nr_m[1] - 1));
-                        scalar zmin =
-                            beta0[2] * (view_aNm1(i, j, k)[gd] + view_aNp1(i, j, k + 1)[gd])
-                            + beta1[2] * (view_aN(i, j, k)[gd] + view_aN(i, j, k + 1)[gd])
-                            + beta2[2] * (view_aNm1(i, j, k + 1)[gd]);
-                        bool isXmax = ((ig == nr_m[0] - 1) && (jg > 0) && (kg > 0)
-                                       && (jg < nr_m[1] - 1) && (kg < nr_m[2] - 1));
-                        scalar xmax =
-                            beta0[0] * (view_aNm1(i, j, k)[gd] + view_aNp1(i - 1, j, k)[gd])
-                            + beta1[0] * (view_aN(i, j, k)[gd] + view_aN(i - 1, j, k)[gd])
-                            + beta2[0] * (view_aNm1(i - 1, j, k)[gd]);
-                        bool isYmax = ((ig > 0) && (jg == nr_m[1] - 1) && (kg > 0)
-                                       && (ig < nr_m[0] - 1) && (kg < nr_m[2] - 1));
-                        scalar ymax =
-                            beta0[1] * (view_aNm1(i, j, k)[gd] + view_aNp1(i, j - 1, k)[gd])
-                            + beta1[1] * (view_aN(i, j, k)[gd] + view_aN(i, j - 1, k)[gd])
-                            + beta2[1] * (view_aNm1(i, j - 1, k)[gd]);
-                        bool isZmax = ((ig > 0) && (jg > 0) && (kg == nr_m[2] - 1)
-                                       && (ig < nr_m[0] - 1) && (jg < nr_m[1] - 1));
-                        scalar zmax =
-                            beta0[2] * (view_aNm1(i, j, k)[gd] + view_aNp1(i, j, k - 1)[gd])
-                            + beta1[2] * (view_aN(i, j, k)[gd] + view_aN(i, j, k - 1)[gd])
-                            + beta2[2] * (view_aNm1(i, j, k - 1)[gd]);
-
-                        bool isInterior = !(isXmin | isXmax | isYmin | isYmax | isZmin | isZmax);
-                        view_aNp1(i, j, k)[gd] = isXmin * xmin + isYmin * ymin + isZmin * zmin
-                                                 + isXmax * xmax + isYmax * ymax + isZmax * zmax
-                                                 + isInterior * view_aNp1(i, j, k)[gd];
                     });
             }
         Kokkos::fence();
-        //for (size_t gd = 0; gd < Dim; ++gd) {
-            //if(false)
-            Kokkos::parallel_for(
-                "Periodic boundaryie", ippl::getRangePolicy(view_aNp1, 0),
-                KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
-                    size_t wraparound_i = i, wraparound_j = j, wraparound_k = k;
-                    if(bconds[0] == PERIODIC_FACE){
-                        if ((int)i < nghost_a) {
-                            wraparound_i += view_aN.extent(0) - 2 * nghost_a;
-                        } else if (i > view_aN.extent(0) - nghost_a - 1) {
-                            wraparound_i -= view_aN.extent(0) - 2 * nghost_a;
-                            
-                        }
-                    }
-                    if(bconds[1] == PERIODIC_FACE){
-                        if ((int)j < nghost_a) {
-                            wraparound_j += view_aN.extent(1) - 2 * nghost_a;
-                        } else if (j > view_aN.extent(1) - nghost_a - 1) {
-                            wraparound_j -= view_aN.extent(1) - 2 * nghost_a;
-                        }
-                    }
-                    if(bconds[2] == PERIODIC_FACE){
-                        if ((int)k < nghost_a) {
-                            wraparound_k += view_aN.extent(2) - 2 * nghost_a;
-                        } else if (k > view_aN.extent(2) - nghost_a - 1) {
-                            wraparound_k -= view_aN.extent(2) - 2 * nghost_a;
-                        }
-                    }
-
-                    view_aNp1(i, j, k)[0] = view_aNp1(wraparound_i, wraparound_j, wraparound_k)[0];
-                    view_aNp1(i, j, k)[1] = view_aNp1(wraparound_i, wraparound_j, wraparound_k)[1];
-                    view_aNp1(i, j, k)[2] = view_aNp1(wraparound_i, wraparound_j, wraparound_k)[2];
-
-                    view_phiNp1(i, j, k) = view_phiNp1(wraparound_i, wraparound_j, wraparound_k);
-                });
-        //}
-        Kokkos::fence();
-        // evaluate E and B fields at N
-        //std::cout << "Energy: " << (double)field_evaluation() << " "
-        //          << (double)this->absorbed__energy << "\n";
-
-        // store potentials at N in Nm1, and Np1 in N
         field_evaluation();
-        
-
-        bunch.E_gather.gather(*this->En_mp, bunch.R);
-        bunch.B_gather.gather(*this->Bn_mp, bunch.R);
         auto gammabeta_view = bunch.gamma_beta.getView();
         auto Qview = bunch.Q.getView();
         auto rview = bunch.R.getView();
         auto rnp1view = bunch.R_np1.getView();
+
+        Kokkos::View<bool*> invalid("OOB Particcel", bunch.getLocalNum());
+        size_t invalid_count = 0;
+        Kokkos::parallel_reduce(bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i, size_t& ref){
+            bool out_of_bounds = false;
+            ippl::Vector<scalar, Dim> ppos = rview(i);
+            for(size_t i = 0;i < Dim;i++){
+                out_of_bounds |= (ppos[i] <= 0.0);
+                out_of_bounds |= (ppos[i] >= 1.0); //Check against simulation domain
+            }
+            invalid(i) = out_of_bounds;
+            ref += out_of_bounds;
+        }, invalid_count);
+        bunch.destroy(invalid, invalid_count);
+        bunch.E_gather.gather(*this->En_mp, bunch.R);
+        bunch.B_gather.gather(*this->Bn_mp, bunch.R);
+        
         auto E_gatherview = bunch.E_gather.getView();
         auto B_gatherview = bunch.B_gather.getView();
         constexpr scalar e_mass = 0.5110;
         scalar this_dt = this->dt;
+        int ronk = ippl::Comm->rank();
         Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
             scalar charge = Qview(i);
@@ -669,20 +597,17 @@ namespace ippl {
             
             
             const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
-            const scalar alpha = -charge * this_dt / (2 * e_mass * sqrt(1 + dot_prod(t1, t1)));
+            const scalar alpha = -charge * this_dt / (scalar(2) * e_mass * sqrt(1 + dot_prod(t1, t1)));
             const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
-
             const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
             const ippl::Vector<scalar, 3> ngammabeta = t3 - charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
-
+            if(ronk == 0){
+                ippl::Vector<scalar, 3> adder = this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));
+                //LOG(adder);
+            }
             rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));            
         });
-        //auto crpd = bunch.Q * ippl::cross(bunch.gamma_beta, bunch.B_gather);
-        //bunch.gamma_beta = bunch.gamma_beta + (crpd / e_mass + bunch.E_gather * e_charge / e_mass);
-        //bunch.R_np1 = bunch.R + bunch.gamma_beta * dt;
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
-        //for(size_t i = 0;i < JN_mp->getView().extent(1);i++)
-        //    JN_mp->getView()(20, i, 20) = ippl::Vector<scalar, 3>{0,1,0};
         bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, scalar(1.0) / dt);
         
         //bunch.layout_m->update();
@@ -700,31 +625,11 @@ namespace ippl {
     Tfields FDTDSolver<Tfields, Dim, M, C>::field_evaluation() {
         // magnetic field is the curl of the vector potential
         // we take the average of the potential at N and N+1
-        typename FDTDSolver<Tfields, Dim, M, C>::Field_t kurl = phiN_m.deepCopy();
-        //kurl = ippl::dot(phiN_m, phiN_m);
-        //std::cout << "phisum: " << kurl.sum() << "\n";
-        {
-            size_t i = (size_t)(0.48 / kurl.get_mesh().getMeshSpacing()[0]) + 1;
-            size_t j = (size_t)(0.48 / kurl.get_mesh().getMeshSpacing()[1]) + 1;
-            size_t k = (size_t)(0.48 / kurl.get_mesh().getMeshSpacing()[2]) + 1;
-            //std::cout << "Kurlmax: " << kurl.getView()(i, j, k) << "\n\n";
-            //std::cout << "Surrounding: ";
-            //std::cout << aN_m.getView()(i, j, k - 1) << " ";
-            //std::cout << aN_m.getView()(i, j, k + 1) << " ";
-            //std::cout << ippl::Vector<double, 3>((aN_m.getView()(i, j, k + 1) - aN_m.getView()(i, j, k - 1)) / kurl.get_mesh().getMeshSpacing()[2] / 2.0) << " ";
-            //std::cout << std::endl;
 
-        }
-
-        // electric field is the time derivative of the vector potential
-        // minus the gradient of the scalar potential
-        //auto expreschen = -(aNp1_m - aN_m) / dt - grad(phiN_m);
-        //auto expression = aNp1_m + aN_m;
         (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
         (*Bn_mp) = (curl(aN_m) + curl(aNp1_m)) * 0.5;
         if(radiation){
             (*radiation) = ippl::cross(*En_mp, *Bn_mp);
-            //LOG(radiation->getView()(21, 21, 21));
         }
 
         typename FDTDSolver<Tfields, Dim, M, C>::Field_t energy_density = phiN_m.deepCopy();
@@ -757,6 +662,9 @@ namespace ippl {
         // return 1.0;
         using Kokkos::exp;
         //using ::exp;
+
+
+        
         const scalar y = 1.0 - (j - 2) * hr_m[1];  // From the max boundary; fix this sometime
         const scalar t = it * dt;
         scalar plane_wave_excitation_x = (y - t < 0) ? -(y - t) : 0;
@@ -777,40 +685,12 @@ namespace ippl {
         constexpr scalar epsilon0 = 1.0 / (c * c * mu0);
         constexpr scalar electron_charge = 0.30282212088;
         constexpr scalar electron_mass = 0.5110;
-        bunch.create(particle_count * !!!ippl::Comm->rank());
+        bunch.create(particle_count / ippl::Comm->size());
         auto Rview = bunch.R.getView();
         auto gbview = bunch.gamma_beta.getView();
-        typename playout_type::RegionLayout_t const& rlayout = pl.getRegionLayout();
-        typename playout_type::RegionLayout_t::view_type regions_view = rlayout.getdLocalRegions();
-        Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i){
-            (void)i;
-            size_t index = i;
-            i *= 123123ul;
-	        i ^= i << 13;
-	        i ^= i >> 7;
-	        i ^= i << 17;
-            i ^= i << 13;
-	        i ^= i >> 7;
-	        i ^= i << 17;
-            i ^= i << 13;
-	        i ^= i >> 7;
-	        i ^= i << 17;
-            double xvalue = double(i) / 1.9e19;
-            i ^= i << 13;
-	        i ^= i >> 7;
-	        i ^= i << 17;
-            double yvalue = double(i) / 1.9e19;
-            i ^= i << 13;
-	        i ^= i >> 7;
-	        i ^= i << 17;
-            double zvalue = double(i) / 1.9e19;
-            Rview(index) = ippl::Vector<scalar, 3>{xvalue, yvalue, zvalue};
-
-            gbview(index) = ippl::Vector<scalar, 3>{0.5 - xvalue, 0.5 - yvalue, 0.5 - zvalue} * 2.0;
-            //LOG("setpos to: " << (ippl::Vector<scalar, 3>{xvalue, yvalue, zvalue}));
-
-        });
-        bunch.Q = electron_charge * 1000.0;
+        
+        
+        bunch.Q = electron_charge * 50.0;
         bunch.mass = electron_mass;
         //bunch.R = ippl::Vector<scalar, 3>(0.4);
         //bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e1, 0.0};
@@ -841,6 +721,16 @@ namespace ippl {
         aN_m   = 0.0;
         aNp1_m = 0.0;
     };
+    template<typename Tfields, unsigned Dim, class M, class C>
+    template<typename callable>
+    void FDTDSolver<Tfields, Dim, M, C>::apply_to_fields(callable c){
+        c(aN_m);
+        c(aNp1_m);
+        c(aNm1_m);
+        c(phiN_m);
+        c(phiNp1_m);
+        c(phiNm1_m);
+    }
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
     void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(callable c){
