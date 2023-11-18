@@ -206,31 +206,40 @@ struct second_order_abc{
         return ret;
     }
 };
+auto variadic_min(auto x){
+    return x;
+}
+auto variadic_min(auto x, auto y, auto... xs){
+    return std::min(x, variadic_min(y, xs...));
+}
+
 template <typename... index_and_extent_types>
 KOKKOS_INLINE_FUNCTION size_t boundary_distance(index_and_extent_types&&... x){
     std::tuple<index_and_extent_types...> tp{x...};
     constexpr size_t hsize = sizeof...(index_and_extent_types) / 2;
     auto difference_minimizer = KOKKOS_LAMBDA<size_t... Index>(const std::index_sequence<Index...>& seq){
-        size_t min_to_0 = std::min({std::get<Index>(tp)...});
-        size_t min_to_extent = std::min({(std::get<Index + hsize>(tp) - std::get<Index>(tp) - 1)...});
+        //size_t min_to_0 = std::min({std::get<Index>(tp)...});
+        size_t min_to_0 = variadic_min(std::get<Index>(tp)...);
+        //size_t min_to_extent = std::min({(std::get<Index + hsize>(tp) - std::get<Index>(tp) - 1)...});
+        size_t min_to_extent = variadic_min((std::get<Index + hsize>(tp) - std::get<Index>(tp) - 1)...);
         (void)seq;
         return std::min(min_to_0, min_to_extent);
     };
     return difference_minimizer(std::make_index_sequence<sizeof...(index_and_extent_types) / 2>{});
 }
 template <typename... extent_types>
-KOKKOS_INLINE_FUNCTION std::array<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(
+KOKKOS_INLINE_FUNCTION ippl::Vector<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(
     size_t boundary_distance, const std::tuple<extent_types...>& _index,
     const std::tuple<extent_types...>& _extents) {
     constexpr size_t Dim = std::tuple_size_v<std::tuple<extent_types...>>;
 
     constexpr auto get_array = []<typename... Ts>(Ts&&... x) {
-        return std::array<size_t, sizeof...(x)>{static_cast<size_t>(x)...};
+        return ippl::Vector<size_t, sizeof...(x)>{static_cast<size_t>(x)...};
     };
 
-    std::array<size_t, Dim> index   = std::apply(get_array, _index);
-    std::array<size_t, Dim> extents = std::apply(get_array, _extents);
-    std::array<axis_aligned_occlusion, Dim> ret_array;
+    ippl::Vector<size_t, Dim> index   = std::apply(get_array, _index);
+    ippl::Vector<size_t, Dim> extents = std::apply(get_array, _extents);
+    ippl::Vector<axis_aligned_occlusion, Dim> ret_array;
 
     size_t minimal_distance_to_zero             = index[0];
     size_t minimal_distance_to_extent_minus_one = extents[0] - index[0] - 1;
@@ -253,14 +262,21 @@ KOKKOS_INLINE_FUNCTION std::array<axis_aligned_occlusion, sizeof...(extent_types
     }
     return ret_array;
 }
-// template<typename T>
-// ippl::Vector<T, 3> cross(const ippl::Vector<T, 3>& a, const ippl::Vector<T, 3>& b){
-//     ippl::Vector<T, 3> ret;
-//     ret[0] = a[1]* b[2] - a[2] * b[1];
-//     ret[2] = a[0] * b[1] - a[1] * b[0];
-//     ret[1] = a[2] * b[0] - a[0] * b[2];
-//     return ret;
-// }
+template<typename _scalar, class PLayout>
+_scalar bunch_energy(const Bunch<_scalar, PLayout>& bantsch){
+    using scalar = _scalar;
+    scalar ret = 0;
+    auto gamma_beta_view = bantsch.gamma_beta.getView();
+    auto mass_view = bantsch.mass.getView();
+    Kokkos::parallel_reduce(bantsch.getLocalNum(), KOKKOS_LAMBDA(size_t i, _scalar& ref){
+        using Kokkos::sqrt;
+        ippl::Vector<_scalar, 3> gbi = gamma_beta_view(i);
+        gbi *= ippl::detail::Scalar<scalar>(mass_view(i));
+        scalar total_energy = mass_view(i) * mass_view(i) + gbi.squaredNorm();
+        ref += sqrt(total_energy);
+    }, ret);
+    return ret;
+}
 namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
@@ -417,64 +433,22 @@ namespace ippl {
                         const int ig = i + ldom[0].first() - nghost_a;
                         const int jg = j + ldom[1].first() - nghost_a;
                         const int kg = k + ldom[2].first() - nghost_a;
-
+                        size_t distance = boundary_distance(ig, jg, kg, nr_m[0], nr_m[1], nr_m[2]);
+                        ippl::Vector<scalar, Dim> as{a2, a4, a6};
+                        ippl::Vector<axis_aligned_occlusion, Dim> sfocc = boundary_occlusion_of(0, std::make_tuple(ig, jg, kg), std::make_tuple(nr_m[0], nr_m[1], nr_m[2]));
+                        ippl::Vector<axis_aligned_occlusion, Dim> tfocc = boundary_occlusion_of(1, std::make_tuple(ig, jg, kg), std::make_tuple(nr_m[0], nr_m[1], nr_m[2]));
                         // SF boundary in all 3 dimensions
-                        bool isXmin_SF = ((ig == 1) && (jg > 1) && (kg > 1) && (jg < nr_m[1] - 2)
-                                          && (kg < nr_m[2] - 2));
-                        scalar xmin_SF = a2 * gaussian(iteration, i, j, k);
-                        bool isYmin_SF = ((ig > 1) && (jg == 1) && (kg > 1) && (ig < nr_m[0] - 2)
-                                          && (kg < nr_m[2] - 2));
-                        scalar ymin_SF = a4 * gaussian(iteration, i, j, k);
-                        bool isZmin_SF = ((ig > 1) && (jg > 1) && (kg == 1) && (ig < nr_m[0] - 2)
-                                          && (jg < nr_m[1] - 2));
-                        scalar zmin_SF = a6 * gaussian(iteration, i, j, k);
-                        bool isXmax_SF = ((ig == nr_m[0] - 2) && (jg > 1) && (kg > 1)
-                                          && (jg < nr_m[1] - 2) && (kg < nr_m[2] - 2));
-                        scalar xmax_SF = -a2 * gaussian(iteration, i, j, k);
-                        bool isYmax_SF = ((ig > 1) && (jg == nr_m[1] - 2) && (kg > 1)
-                                          && (ig < nr_m[0] - 2) && (kg < nr_m[2] - 2));
-                        scalar ymax_SF = -a4 * gaussian(iteration, i, j, k);
-                        bool isZmax_SF = ((ig > 1) && (jg > 1) && (kg == nr_m[2] - 2)
-                                          && (ig < nr_m[0] - 2) && (jg < nr_m[1] - 2));
-                        scalar zmax_SF = -a6 * gaussian(iteration, i, j, k);
+                        scalar tfsfaccum = 0.0;
+                        const scalar seed_function_eval = gaussian(iteration, i, j, k);
+                        for(unsigned int d = 0;d < Dim;d++){
+                            tfsfaccum +=  as[d] * seed_function_eval * scalar(sfocc[d] == axis_aligned_occlusion::AT_MIN);
+                            tfsfaccum += -as[d] * seed_function_eval * scalar(sfocc[d] == axis_aligned_occlusion::AT_MAX);
+                            tfsfaccum +=  as[d] * seed_function_eval * scalar(tfocc[d] == axis_aligned_occlusion::AT_MIN);
+                            tfsfaccum += -as[d] * seed_function_eval * scalar(tfocc[d] == axis_aligned_occlusion::AT_MAX);
+                        }
 
-                        // TF boundary
-                        bool isXmin_TF = ((ig == 2) && (jg > 2) && (kg > 2) && (jg < nr_m[1] - 3)
-                                          && (kg < nr_m[2] - 3));
-                        scalar xmin_TF = -a2 * gaussian(iteration, i, j, k);
-                        bool isYmin_TF = ((ig > 2) && (jg == 2) && (kg > 2) && (ig < nr_m[0] - 3)
-                                          && (kg < nr_m[2] - 3));
-                        scalar ymin_TF = -a4 * gaussian(iteration, i, j, k);
-                        bool isZmin_TF = ((ig > 2) && (jg > 2) && (kg == 2) && (ig < nr_m[0] - 3)
-                                          && (jg < nr_m[1] - 3));
-                        scalar zmin_TF = -a6 * gaussian(iteration, i, j, k);
-                        bool isXmax_TF = ((ig == nr_m[0] - 3) && (jg > 2) && (kg > 2)
-                                          && (jg < nr_m[1] - 3) && (kg < nr_m[2] - 3));
-                        scalar xmax_TF = a2 * gaussian(iteration, i, j, k);
-                        bool isYmax_TF = ((ig > 2) && (jg == nr_m[1] - 3) && (kg > 2)
-                                          && (ig < nr_m[0] - 3) && (kg < nr_m[2] - 3));
-                        scalar ymax_TF = a4 * gaussian(iteration, i, j, k);
-                        bool isZmax_TF = ((ig > 2) && (jg > 2) && (kg == nr_m[2] - 3)
-                                          && (ig < nr_m[0] - 3) && (jg < nr_m[1] - 3));
-                        scalar zmax_TF = a6 * gaussian(iteration, i, j, k);
-                        isXmax_SF      = false;
-                        isXmax_TF      = false;
-                        isXmin_SF      = false;
-                        isYmin_TF      = false;
-                        // isYmax_SF = false;
-                        // isYmax_TF = false;
-                        isYmin_SF = false;
-                        isXmin_TF = false;
-                        isZmax_SF = false;
-                        isZmax_TF = false;
-                        isZmin_SF = false;
-                        isZmin_TF = false;
                         // update field (add seed)
-                        view_aNp1(i, j, k)[gd] +=
-                            isXmin_SF * xmin_SF + isYmin_SF * ymin_SF + isZmin_SF * zmin_SF
-                            + isXmax_SF * xmax_SF + isYmax_SF * ymax_SF + isZmax_SF * zmax_SF
-                            + isXmin_TF * xmin_TF + isYmin_TF * ymin_TF + isZmin_TF * zmin_TF
-                            + isXmax_TF * xmax_TF + isYmax_TF * ymax_TF + isZmax_TF * zmax_TF;
+                        view_aNp1(i, j, k)[gd] += tfsfaccum;
                     });
             }
         }
@@ -482,85 +456,42 @@ namespace ippl {
             
         // apply 1st order Absorbing Boundary Conditions
         // for both scalar and vector potentials
+        for (size_t gd = 0; gd < 3; ++gd) {
+            if(this->bconds[gd] != MUR_ABC_1ST)continue;
+            std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(nr_m[0] + 2, nr_m[1] + 2, nr_m[2] + 2);
             Kokkos::parallel_for(
-                "Scalar potential ABCs", ippl::getRangePolicy(view_phiN, nghost_phi),
+                "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
                 KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                     // global indices
-                    const int ig = i + ldom[0].first() - nghost_phi;
-                    const int jg = j + ldom[1].first() - nghost_phi;
-                    const int kg = k + ldom[2].first() - nghost_phi;
+                    const int ig = i + ldom[0].first();// - nghost_a;
+                    const int jg = j + ldom[1].first();// - nghost_a;
+                    const int kg = k + ldom[2].first();// - nghost_a;
 
-                    // boundary values: 1st order Absorbing Boundary Conditions
-                    bool isXmin = ((ig == 0) && (jg > 0) && (kg > 0) && (jg < nr_m[1] - 1)
-                                   && (kg < nr_m[2] - 1));
-                    scalar xmin = beta0[0] * (view_phiNm1(i, j, k) + view_phiNp1(i + 1, j, k))
-                                  + beta1[0] * (view_phiN(i, j, k) + view_phiN(i + 1, j, k))
-                                  + beta2[0] * (view_phiNm1(i + 1, j, k));
-                    bool isYmin = ((ig > 0) && (jg == 0) && (kg > 0) && (ig < nr_m[0] - 1)
-                                   && (kg < nr_m[2] - 1));
-                    scalar ymin = beta0[1] * (view_phiNm1(i, j, k) + view_phiNp1(i, j + 1, k))
-                                  + beta1[1] * (view_phiN(i, j, k) + view_phiN(i, j + 1, k))
-                                  + beta2[1] * (view_phiNm1(i, j + 1, k));
-                    bool isZmin = ((ig > 0) && (jg > 0) && (kg == 0) && (ig < nr_m[0] - 1)
-                                   && (jg < nr_m[1] - 1));
-                    scalar zmin = beta0[2] * (view_phiNm1(i, j, k) + view_phiNp1(i, j, k + 1))
-                                  + beta1[2] * (view_phiN(i, j, k) + view_phiN(i, j, k + 1))
-                                  + beta2[2] * (view_phiNm1(i, j, k + 1));
-                    bool isXmax = ((ig == nr_m[0] - 1) && (jg > 0) && (kg > 0) && (jg < nr_m[1] - 1)
-                                   && (kg < nr_m[2] - 1));
-                    scalar xmax = beta0[0] * (view_phiNm1(i, j, k) + view_phiNp1(i - 1, j, k))
-                                  + beta1[0] * (view_phiN(i, j, k) + view_phiN(i - 1, j, k))
-                                  + beta2[0] * (view_phiNm1(i - 1, j, k));
-                    bool isYmax = ((ig > 0) && (jg == nr_m[1] - 1) && (kg > 0) && (ig < nr_m[0] - 1)
-                                   && (kg < nr_m[2] - 1));
-                    scalar ymax = beta0[1] * (view_phiNm1(i, j, k) + view_phiNp1(i, j - 1, k))
-                                  + beta1[1] * (view_phiN(i, j, k) + view_phiN(i, j - 1, k))
-                                  + beta2[1] * (view_phiNm1(i, j - 1, k));
-                    bool isZmax = ((ig > 0) && (jg > 0) && (kg == nr_m[2] - 1) && (ig < nr_m[0] - 1)
-                                   && (jg < nr_m[1] - 1));
-                    scalar zmax = beta0[2] * (view_phiNm1(i, j, k) + view_phiNp1(i, j, k - 1))
-                                  + beta1[2] * (view_phiN(i, j, k) + view_phiN(i, j, k - 1))
-                                  + beta2[2] * (view_phiNm1(i, j, k - 1));
-                    bool isInterior      = !(isXmin | isXmax | isYmin | isYmax | isZmin | isZmax);
-                    view_phiNp1(i, j, k) = isXmin * xmin + isYmin * ymin + isZmin * zmin
-                                           + isXmax * xmax + isYmax * ymax + isZmax * zmax
-                                           + isInterior * view_phiNp1(i, j, k);
-                });
-            //bool isBoundary = (lDomains[myRank][d].max() == domain[d].max())
-            //                  || (lDomains[myRank][d].min() == domain[d].min());
-            for (size_t gd = 0; gd < 3; ++gd) {
-                if(this->bconds[gd] != MUR_ABC_1ST)continue;
-                std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(nr_m[0] + 2, nr_m[1] + 2, nr_m[2] + 2);
-                Kokkos::parallel_for(
-                    "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
-                    KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
-                        // global indices
-                        const int ig = i + ldom[0].first();// - nghost_a;
-                        const int jg = j + ldom[1].first();// - nghost_a;
-                        const int kg = k + ldom[2].first();// - nghost_a;
+                    assert((ig | jg | kg) >= 0); //Assert all positive
 
-                        assert((ig | jg | kg) >= 0); //Assert all positive
-
-                        std::array<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, std::make_tuple((size_t)ig, (size_t)jg, (size_t)kg), extenz);
-                        
-                        //for(unsigned ax = 0;ax < Dim;ax++){
-                            if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
-                                int offs = bocc[gd] == AT_MIN ? 1 : -1;
-                                if(gd == 0){
-                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
-                                    //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-                                }
-                                if(gd == 1){
-                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
-                                    //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-                                }
-                                if(gd == 2){
-                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
-                                    //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
-                                }
-                            }
-                    });
-            }
+                    ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, std::make_tuple((size_t)ig, (size_t)jg, (size_t)kg), extenz);
+                    
+                    if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
+                        int offs = bocc[gd] == AT_MIN ? 1 : -1;
+                        if(gd == 0){
+                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
+                            view_phiN(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
+                            //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                        }
+                        if(gd == 1){
+                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
+                            view_phiN(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
+                            //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                        }
+                        if(gd == 2){
+                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
+                            view_phiN(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
+                            //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                        }
+                    }
+                }
+            );
+        }
         Kokkos::fence();
         field_evaluation();
         auto gammabeta_view = bunch.gamma_beta.getView();

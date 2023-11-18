@@ -31,45 +31,39 @@
 template <typename _scalar, class PLayout>
 struct Bunch : public ippl::ParticleBase<PLayout> {
     using scalar = _scalar;
+
+    // Constructor for the Bunch class, taking a PLayout reference
     Bunch(PLayout& playout)
         : ippl::ParticleBase<PLayout>(playout) {
-        this->addAttribute(Q);
-        this->addAttribute(mass);
-        this->addAttribute(gamma_beta);
-        this->addAttribute(R_np1);
-        this->addAttribute(E_gather);
-        this->addAttribute(B_gather);
+        // Add attributes to the particle bunch
+        this->addAttribute(Q);          // Charge attribute
+        this->addAttribute(mass);       // Mass attribute
+        this->addAttribute(gamma_beta); // Gamma-beta attribute (product of relativistiv gamma and beta)
+        this->addAttribute(R_np1);      // Position attribute for the next time step
+        this->addAttribute(E_gather);   // Electric field attribute for particle gathering
+        this->addAttribute(B_gather);   // Magnetic field attribute for particle gathering
     }
 
+    // Destructor for the Bunch class
     ~Bunch() {}
-    
-    using charge_container_type   = ippl::ParticleAttrib             <scalar    >;
+
+    // Define container types for various attributes
+    using charge_container_type   = ippl::ParticleAttrib<scalar>;
     using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
     using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
-    charge_container_type Q;
-    charge_container_type mass;
-    velocity_container_type gamma_beta;
-    typename ippl::ParticleBase<PLayout>::particle_position_type R_np1;
-    vector_container_type E_gather;
-    vector_container_type B_gather;
+
+    // Declare instances of the attribute containers
+    charge_container_type Q;          // Charge container
+    charge_container_type mass;       // Mass container
+    velocity_container_type gamma_beta; // Gamma-beta container
+    typename ippl::ParticleBase<PLayout>::particle_position_type R_np1; // Position container for the next time step
+    vector_container_type E_gather;   // Electric field container for particle gathering
+    vector_container_type B_gather;   // Magnetic field container for particle gathering
 };
+
 template<typename _scalar, class PLayout>
-_scalar bunch_energy(const Bunch<_scalar, PLayout>& bantsch){
-    using scalar = _scalar;
-    scalar ret = 0;
-    auto gamma_beta_view = bantsch.gamma_beta.getView();
-    auto mass_view = bantsch.mass.getView();
-    Kokkos::parallel_reduce(bantsch.getLocalNum(), KOKKOS_LAMBDA(size_t i, _scalar& ref){
-        using Kokkos::sqrt;
-        ippl::Vector<_scalar, 3> gbi = gamma_beta_view(i);
-        gbi *= ippl::detail::Scalar<scalar>(mass_view(i));
-        scalar total_energy = mass_view(i) * mass_view(i) + gbi.squaredNorm();
+_scalar bunch_energy(const Bunch<_scalar, PLayout>& bantsch);
 
-
-        ref += sqrt(total_energy);
-    }, ret);
-    return ret;
-}
 namespace ippl {
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<Tfields, Dim>,
               class C = typename M::DefaultCentering>
@@ -111,6 +105,11 @@ namespace ippl {
 
         template<typename callable>
         void apply_to_fields(callable c);
+        /**
+         *
+         * @param c the callable object used to fill the initial condition
+         *
+         */
         template<typename callable>
         void fill_initialcondition(callable c);
         template<typename callable>
