@@ -206,10 +206,10 @@ struct second_order_abc{
         return ret;
     }
 };
-auto variadic_min(auto x){
+KOKKOS_INLINE_FUNCTION auto variadic_min(auto x){
     return x;
 }
-auto variadic_min(auto x, auto y, auto... xs){
+KOKKOS_INLINE_FUNCTION auto variadic_min(auto x, auto y, auto... xs){
     return std::min(x, variadic_min(y, xs...));
 }
 
@@ -501,7 +501,7 @@ namespace ippl {
 
         Kokkos::View<bool*> invalid("OOB Particcel", bunch.getLocalNum());
         size_t invalid_count = 0;
-        Kokkos::parallel_reduce(bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i, size_t& ref){
+        Kokkos::parallel_reduce(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(size_t i, size_t& ref){
             bool out_of_bounds = false;
             ippl::Vector<scalar, Dim> ppos = rview(i);
             for(size_t i = 0;i < Dim;i++){
@@ -520,7 +520,7 @@ namespace ippl {
         constexpr scalar e_mass = 0.5110;
         scalar this_dt = this->dt;
         int ronk = ippl::Comm->rank();
-        Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(const size_t i){
+        Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
             scalar charge = Qview(i);
             //using ::sqrt;
@@ -570,16 +570,16 @@ namespace ippl {
         auto bview = Bn_mp->getView();
         double EE = 0.0;
         double BE = 0.0;
-        double* EEptr = &EE;
-        double* BEptr = &BE;
-        
-        Kokkos::parallel_for(aN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k){
-            //edview(i,j,k) = aview(i,j,k)[2];
-            //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
-            *EEptr += squaredNorm(eview(i, j, k));
-            *BEptr += squaredNorm(bview(i, j, k));
-            edview(i,j,k) = squaredNorm(eview(i,j,k)) + squaredNorm(bview(i,j,k));
-        });
+        //double* EEptr = &EE;
+        //double* BEptr = &BE;
+        //
+        //Kokkos::parallel_for(aN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k){
+        //    //edview(i,j,k) = aview(i,j,k)[2];
+        //    //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
+        //    *EEptr += squaredNorm(eview(i, j, k));
+        //    *BEptr += squaredNorm(bview(i, j, k));
+        //    edview(i,j,k) = squaredNorm(eview(i,j,k)) + squaredNorm(bview(i,j,k));
+        //});
         Kokkos::fence();
         //std::cout << "E contr: " << EE * hr_m[0] * hr_m[1] * hr_m[2] << "B contr: " << BE * hr_m[0] * hr_m[1] * hr_m[2] << "\n"; 
         //energy_density = (ippl::dot(*En_mp, *En_mp) + ippl::dot(*Bn_mp, *Bn_mp)) * scalar(0.5);
@@ -673,7 +673,7 @@ namespace ippl {
         //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = aN_m.getNghost();
         Kokkos::parallel_for(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost), KOKKOS_LAMBDA(const int i, const int j, const int k){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;

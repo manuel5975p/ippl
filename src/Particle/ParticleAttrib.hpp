@@ -209,9 +209,6 @@ namespace ippl {
                 vector_type to                   = (pp2(idx) - origin);
 
                 //val is charge (or other quantity)
-                if(ippl::Comm->rank() == 0){
-                    //std::cout << idx << ": Depositing " << from << " to " << to << "\n";
-                }
                 const value_type& val = dview_m(idx);
                 detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, val * dt_scale, lDom, nghost);
             });

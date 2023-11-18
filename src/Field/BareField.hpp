@@ -125,13 +125,13 @@ namespace ippl {
         
         //using capture_type     = detail::CapturedExpression<E, N>;
         //std::cout << sizeof(capture_type) << " : " << N << "\n";
-        //auto vc = dview_m;
+        auto dview_var = dview_m;
         //capture_type expr_     = reinterpret_cast<const capture_type&>(expr);
         using index_array_type = typename RangePolicy<Dim, execution_space>::index_array_type;
         ippl::parallel_for(
             "BareField::operator=(const Expression&)", getRangePolicy(dview_m, nghost_m),
             KOKKOS_LAMBDA(const index_array_type& args) {
-                apply(dview_m, args) = apply(expr_, args);
+                apply(dview_var, args) = apply(expr_, args);
             });
         return *this;
     }

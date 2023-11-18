@@ -179,7 +179,7 @@ namespace ippl {
          * @param scale The scaling factor to apply during the scatter operation. This is usually set to the inverse of the timestep.
          */
         template<typename T>
-        T fractional_part(T x){
+        KOKKOS_INLINE_FUNCTION T fractional_part(T x){
             using Kokkos::floor;
             //using ::floor;
             return x - floor(x);

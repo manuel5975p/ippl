@@ -2,7 +2,6 @@
 #define FRAST3D_HPP
 #include <cmath>
 #ifdef FRAST3D_IMPLEMENTATION
-#include <png++/png.hpp>
 #include <iostream>
 #include <fstream>
 #ifndef FRAST3D_NO_STBI_WRITE_IMPLEMENTATION

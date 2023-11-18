@@ -610,18 +610,21 @@ int main(int argc, char* argv[]) {
         s_t::Field_t::BConds_t  scalar_bcs;
 
         typename s_t::playout_type::RegionLayout_t const& rlayout = solver.pl.getRegionLayout();
-        typename s_t::playout_type::RegionLayout_t::view_type regions_view = rlayout.gethLocalRegions();
+        typename s_t::playout_type::RegionLayout_t::view_type::host_mirror_type regions_view = rlayout.gethLocalRegions();
 
         Kokkos::Random_XorShift64_Pool<> rand_pool((size_t)(42 + 100 * ippl::Comm->rank()));
-        Kokkos::parallel_for(
-            solver.bunch.getLocalNum(),
-            generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-                solver.bunch.R.getView(),
-                solver.bunch.gamma_beta.getView(),
-                regions_view(ippl::Comm->rank()),
-                rand_pool
-            )
-        );
+        {
+            int rink = ippl::Comm->rank();
+            Kokkos::parallel_for(
+                Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
+                generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                    solver.bunch.R.getView(),
+                    solver.bunch.gamma_beta.getView(),
+                    regions_view(rink),
+                    rand_pool
+                )
+            );
+        }
         auto bcsetter_single = [&vector_bcs, &scalar_bcs, hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
             //vector_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::VField_t, Idx>>(Idx, hr, 1.0, dt);
             //scalar_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::Field_t , Idx>>(Idx, hr, 1.0, dt);
