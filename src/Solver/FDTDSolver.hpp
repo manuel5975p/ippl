@@ -475,17 +475,17 @@ namespace ippl {
                         int offs = bocc[gd] == AT_MIN ? 1 : -1;
                         if(gd == 0){
                             view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
-                            view_phiN(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
+                            view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
                             //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 1){
                             view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
-                            view_phiN(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
+                            view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
                             //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 2){
                             view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
-                            view_phiN(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
+                            view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
                             //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                     }
