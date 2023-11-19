@@ -709,7 +709,7 @@ int main(int argc, char* argv[]) {
             
             if(true || it % 10 == 0){
                 constexpr float rotate_speed = 7.0f;
-                Vector3<float> campos{(float)(-80.0 * std::cos(rotate_speed * (it * dt))), float(0), (float)(-80.0 * std::sin(rotate_speed * (it * dt)))};
+                Vector3<float> campos{(float)(-nr[0] * std::cos(rotate_speed * (it * dt))), float(0), (float)(-nr[0] * std::sin(rotate_speed * (it * dt)))};
                 //Vector3<float> campos{(float)(0), float(0), (float)(-80.0)};
                 Vector3<float> center{nr[0] / 2.0f, nr[1] / 2.0f, nr[2] / 2.0f};
                 campos = center + campos;

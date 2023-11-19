@@ -227,18 +227,20 @@ KOKKOS_INLINE_FUNCTION size_t boundary_distance(index_and_extent_types&&... x){
     };
     return difference_minimizer(std::make_index_sequence<sizeof...(index_and_extent_types) / 2>{});
 }
-template <typename... extent_types>
-KOKKOS_INLINE_FUNCTION ippl::Vector<axis_aligned_occlusion, sizeof...(extent_types)> boundary_occlusion_of(
-    size_t boundary_distance, const std::tuple<extent_types...>& _index,
-    const std::tuple<extent_types...>& _extents) {
-    constexpr size_t Dim = std::tuple_size_v<std::tuple<extent_types...>>;
+
+template <typename index_type, unsigned Dim>
+KOKKOS_INLINE_FUNCTION ippl::Vector<axis_aligned_occlusion, Dim> boundary_occlusion_of(
+    size_t boundary_distance, const ippl::Vector<index_type, Dim> _index,
+    const ippl::Vector<index_type, Dim> _extents) {
+        using Kokkos::min;
+    /*constexpr size_t Dim = std::tuple_size_v<std::tuple<extent_types...>>;
 
     constexpr auto get_array = []<typename... Ts>(Ts&&... x) {
         return ippl::Vector<size_t, sizeof...(x)>{static_cast<size_t>(x)...};
-    };
+    };*/
 
-    ippl::Vector<size_t, Dim> index   = std::apply(get_array, _index);
-    ippl::Vector<size_t, Dim> extents = std::apply(get_array, _extents);
+    ippl::Vector<size_t, Dim> index   = _index;
+    ippl::Vector<size_t, Dim> extents = _extents;
     ippl::Vector<axis_aligned_occlusion, Dim> ret_array;
 
     size_t minimal_distance_to_zero             = index[0];
@@ -246,9 +248,9 @@ KOKKOS_INLINE_FUNCTION ippl::Vector<axis_aligned_occlusion, sizeof...(extent_typ
     ret_array[0] = (axis_aligned_occlusion)(index[0] == boundary_distance);
     ret_array[0] |= (axis_aligned_occlusion)(index[0] == (extents[0] - 1 - boundary_distance)) << 1;
     for (size_t i = 1; i < Dim; i++) {
-        minimal_distance_to_zero = std::min(minimal_distance_to_zero, index[i]);
+        minimal_distance_to_zero = min(minimal_distance_to_zero, index[i]);
         minimal_distance_to_extent_minus_one =
-            std::min(minimal_distance_to_extent_minus_one, extents[i] - index[i] - 1);
+            min(minimal_distance_to_extent_minus_one, extents[i] - index[i] - 1);
         ret_array[i] = (axis_aligned_occlusion)(index[i] == boundary_distance);
         ret_array[i] |= (axis_aligned_occlusion)(index[i] == (extents[i] - 1 - boundary_distance))
                         << 1;
@@ -430,13 +432,14 @@ namespace ippl {
                     "Vector potential seeding", ippl::getRangePolicy(view_aN, nghost_a),
                     KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                         // global indices
-                        const int ig = i + ldom[0].first() - nghost_a;
-                        const int jg = j + ldom[1].first() - nghost_a;
-                        const int kg = k + ldom[2].first() - nghost_a;
+                        const size_t ig = i + ldom[0].first() - nghost_a;
+                        const size_t jg = j + ldom[1].first() - nghost_a;
+                        const size_t kg = k + ldom[2].first() - nghost_a;
+
                         size_t distance = boundary_distance(ig, jg, kg, nr_m[0], nr_m[1], nr_m[2]);
                         ippl::Vector<scalar, Dim> as{a2, a4, a6};
-                        ippl::Vector<axis_aligned_occlusion, Dim> sfocc = boundary_occlusion_of(0, std::make_tuple(ig, jg, kg), std::make_tuple(nr_m[0], nr_m[1], nr_m[2]));
-                        ippl::Vector<axis_aligned_occlusion, Dim> tfocc = boundary_occlusion_of(1, std::make_tuple(ig, jg, kg), std::make_tuple(nr_m[0], nr_m[1], nr_m[2]));
+                        ippl::Vector<axis_aligned_occlusion, Dim> sfocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{ig, jg, kg}, ippl::Vector<size_t, 3>{(size_t)nr_m[0], (size_t)nr_m[1], (size_t)nr_m[2]});
+                        ippl::Vector<axis_aligned_occlusion, Dim> tfocc = boundary_occlusion_of(1, ippl::Vector<size_t, 3>{ig, jg, kg}, ippl::Vector<size_t, 3>{(size_t)nr_m[0], (size_t)nr_m[1], (size_t)nr_m[2]});
                         // SF boundary in all 3 dimensions
                         scalar tfsfaccum = 0.0;
                         const scalar seed_function_eval = gaussian(iteration, i, j, k);
@@ -458,7 +461,7 @@ namespace ippl {
         // for both scalar and vector potentials
         for (size_t gd = 0; gd < 3; ++gd) {
             if(this->bconds[gd] != MUR_ABC_1ST)continue;
-            std::tuple<size_t, size_t, size_t> extenz = std::make_tuple(nr_m[0] + 2, nr_m[1] + 2, nr_m[2] + 2);
+            ippl::Vector<size_t, 3> extenz = ippl::Vector<size_t, 3>{(size_t)nr_m[0] + 2, (size_t)nr_m[1] + 2, (size_t)nr_m[2] + 2};
             Kokkos::parallel_for(
                 "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
                 KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -469,7 +472,7 @@ namespace ippl {
 
                     assert((ig | jg | kg) >= 0); //Assert all positive
 
-                    ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, std::make_tuple((size_t)ig, (size_t)jg, (size_t)kg), extenz);
+                    ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
                     
                     if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
                         int offs = bocc[gd] == AT_MIN ? 1 : -1;
@@ -563,28 +566,25 @@ namespace ippl {
             (*radiation) = ippl::cross(*En_mp, *Bn_mp);
         }
 
-        typename FDTDSolver<Tfields, Dim, M, C>::Field_t energy_density = phiN_m.deepCopy();
-        auto edview = energy_density.getView();
+        //typename FDTDSolver<Tfields, Dim, M, C>::Field_t energy_density = phiN_m.deepCopy();
+        //auto edview = energy_density.getView();
         auto aview = aN_m.getView();
         auto eview = En_mp->getView();
         auto bview = Bn_mp->getView();
-        double EE = 0.0;
-        double BE = 0.0;
-        //double* EEptr = &EE;
-        //double* BEptr = &BE;
-        //
-        //Kokkos::parallel_for(aN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k){
-        //    //edview(i,j,k) = aview(i,j,k)[2];
-        //    //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
-        //    *EEptr += squaredNorm(eview(i, j, k));
-        //    *BEptr += squaredNorm(bview(i, j, k));
-        //    edview(i,j,k) = squaredNorm(eview(i,j,k)) + squaredNorm(bview(i,j,k));
-        //});
+        scalar eb_energy = 0.0;
+        
+        Kokkos::parallel_reduce(aN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k, scalar& ref){
+            //edview(i,j,k) = aview(i,j,k)[2];
+            //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
+            ref += squaredNorm(eview(i, j, k));
+            ref += squaredNorm(bview(i, j, k));
+        }, eb_energy);
+        eb_energy *= 0.5;
         Kokkos::fence();
         //std::cout << "E contr: " << EE * hr_m[0] * hr_m[1] * hr_m[2] << "B contr: " << BE * hr_m[0] * hr_m[1] * hr_m[2] << "\n"; 
         //energy_density = (ippl::dot(*En_mp, *En_mp) + ippl::dot(*Bn_mp, *Bn_mp)) * scalar(0.5);
-        this->total_energy = (EE + BE) * hr_m[0] * hr_m[1] * hr_m[2] + bunch_energy(this->bunch);
-        return (EE + BE) * hr_m[0] * hr_m[1] * hr_m[2];
+        this->total_energy = eb_energy * hr_m[0] * hr_m[1] * hr_m[2] + bunch_energy(this->bunch);
+        return eb_energy * hr_m[0] * hr_m[1] * hr_m[2];
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
