@@ -474,7 +474,7 @@ namespace ippl {
 
                     ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
                     
-                    if(+bocc[gd] && (!(+bocc[gd] & (+bocc[gd] - 1)))){
+                    if(+bocc[gd]){
                         int offs = bocc[gd] == AT_MIN ? 1 : -1;
                         if(gd == 0){
                             view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];

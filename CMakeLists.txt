@@ -1,5 +1,6 @@
-cmake_minimum_required (VERSION 3.1)
+cmake_minimum_required (VERSION 3.11)
 project (IPPL CXX)
+include(FetchContent)
 set (IPPL_VERSION_MAJOR 3)
 set (IPPL_VERSION_MINOR 0.1)
 
@@ -86,7 +87,11 @@ if (ENABLE_UNIT_TESTS)
     add_subdirectory (unit_tests)
     #add_subdirectory(unit_tests_single_precision)
 endif ()
-
+FetchContent_Declare(
+    pohxx
+    GIT_REPOSITORY https://github.com/Fytch/ProgramOptions.hxx
+)
+FetchContent_MakeAvailable(pohxx)
 configure_file (${CMAKE_CURRENT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config_install.cmake )
 

@@ -37,6 +37,7 @@ const char* from_last_slash(const char* x){
 
 #define LOG(X) std::cout << from_last_slash(__FILE__) << ':' << __LINE__ << ": " << X << "\n"
 #include <iostream>
+#include <ProgramOptions.hxx>
 #define FRAST3D_IMPLEMENTATION
 #include "rast3d.hpp"
 //#include <quadmath.h>
@@ -521,24 +522,129 @@ void serial_for(callable c, std::array<uint64_t, Dim> from, std::array<uint64_t,
         }
     }
 }
+template<typename spsc>
+void draw_domain_wireframe(ippl::NDIndex<3U> lindex, ippl::Vector<spsc, 3> spacing, Color lc, float lt){
+    auto lindex_lower = lindex.first();
+    auto lindex_upper = lindex.last();
+    auto ld = [lindex_lower, lindex_upper, lt, spacing](int xo, int yo, int zo, int xo2, int yo2, int zo2, Color lc){
+        ippl::Vector<int, 3U> v[2] = {lindex_lower, lindex_upper};
+        DrawBillboardLineEx(
+            Vector3<float>{(float)(v[xo][0]  + !!xo ) * (float)spacing[0],(float)(v[yo][1]  + !!yo ) * (float)spacing[1],(float)(v[zo][2]  + !!zo ) * (float)spacing[2]},
+            Vector3<float>{(float)(v[xo2][0] + !!xo2) * (float)spacing[0],(float)(v[yo2][1] + !!yo2) * (float)spacing[1],(float)(v[zo2][2] + !!zo2) * (float)spacing[2]}, lt, lc
+        );
+    };
+
+    //Draw local cube wireframe
+    ld(0,0,0,1,0,0,lc);
+    ld(0,0,0,0,1,0,lc);
+    ld(0,0,0,0,0,1,lc);
+    ld(1,0,0,1,1,0,lc);
+    ld(1,0,0,1,0,1,lc);
+    ld(0,1,0,1,1,0,lc);
+    ld(0,1,0,0,1,1,lc);
+    ld(0,0,1,0,1,1,lc);
+    ld(0,0,1,1,0,1,lc);
+    ld(1,1,0,1,1,1,lc);
+    ld(1,0,1,1,1,1,lc);
+    ld(0,1,1,1,1,1,lc);
+}
+template<unsigned int Dim, typename Field>
+void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be set with jet*/, float lt){
+    auto lindex_lower = lindex.first();
+    auto lindex_upper = lindex.last();
+
+    typename Field::view_type::host_mirror_type bhmirror = f.getHostMirror();
+    using scalar = Field::view_type::value_type::value_type;
+    ippl::Vector<scalar, 3> spacing = f.get_mesh().getMeshSpacing();
+    uint64_t nghost = (uint64_t)f.getNghost();
+    Kokkos::deep_copy(bhmirror, f.getView());
+    serial_for<Dim>(KOKKOS_LAMBDA(uint64_t i, uint64_t j, uint64_t k){
+        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.01));
+        i += lindex_lower[0] - nghost;
+        j += lindex_lower[1] - nghost;
+        k += lindex_lower[2] - nghost;
+        Vector3<float> origin{(float)(i * spacing[0]), (float)(j * spacing[1]), (float)(k * spacing[2])};
+        Vector3<float> to = {(float)(origin.x + bv[0]), (float)(origin.y + bv[1]), (float)(origin.z + bv[2])};
+        DrawBillboardLineEx(origin, to, lt, jet(bv.norm() * 50.0));
+    }, {nghost,nghost, nghost}, {bhmirror.extent(0) - nghost, bhmirror.extent(1) - nghost, bhmirror.extent(2) - nghost});
+}
+template<typename bunch_type, typename spsc>
+void draw_particle_bunch(const bunch_type& b,ippl::Vector<spsc, 3> spacing, Mesh to_use){
+    auto bunch_r_view = b.R.getView();
+    using scalar = typename decltype(b.R)::view_type::value_type::value_type;
+    typename decltype(b.R)::view_type::host_mirror_type brmirror = Kokkos::create_mirror(bunch_r_view);
+    Kokkos::deep_copy(brmirror, bunch_r_view);
+    for(size_t i = 0;i < b.getLocalNum();i++){
+        ippl::Vector<scalar, 3> bv = brmirror(i);
+        Matrix4<float> trf(1.0);
+        trf[12] = bv[0] + spacing[0] * 0.5;
+        trf[13] = bv[1] + spacing[1] * 0.5;
+        trf[14] = bv[2] + spacing[2] * 0.5;
+        DrawMesh(to_use, trf); 
+    }
+}
 int main(int argc, char* argv[]) {
     ippl::initialize(argc, argv);
     {
         Inform msg(argv[0]);
         Inform msg2all(argv[0], INFORM_ALL_NODES);
-
+        using scalar = double;
+        scalar time_simulated;
+        po::parser parser;
+        std::vector<int> arg_extents;
+        std::string dres_string;
+        Vector2<unsigned int> drawing_resolution;
+        auto& drawopt = parser["draw"].abbreviation('d').description("Export a frame every step [bool]");
+        auto& resopt = parser["resolution"].abbreviation('r').description("Export frame resolution [int x int]").bind(dres_string);
+        auto& vtkopt = parser["vtk"].description("Export a vtk every step [bool]");
+        auto& timeopt = parser["time"].abbreviation('t').description("Simulation duration (default 1.5) [scalar]").bind(time_simulated);
+        parser[""].description("Dimensions").description("Number of physical grid-cells in each dimension").bind(arg_extents);
+        auto& help_option = parser["help"].abbreviation('h').description("Print this helpscreen");
+        parser(argc, argv);
+        const bool draw = drawopt.was_set();
+        const bool dump_vtk = vtkopt.was_set();
+        if(help_option.was_set()){
+            std::cout << parser << "\n";
+            std::cout << po::white << "Arguments: <nx> <ny> <nz>\n";
+            goto exit;
+        }
+        if(arg_extents.size() != 3){
+            std::cerr << "Must give 3 arguments\n";
+            return 1;
+        }
+        if(!timeopt.was_set()){
+            time_simulated = 1.5;
+        }
+        else if(time_simulated <= 0){
+            std::cerr << "Time must be > 0\n";
+            goto exit;
+        }
+        if(resopt.was_set()){
+            size_t x = dres_string.find('x');
+            if(x == std::string::npos || x == dres_string.size()){
+                std::cerr << "Resolution not in format w x h\n";
+                goto exit;
+            }
+            std::string _w = dres_string.substr(0, x);
+            std::string _h = dres_string.substr(x + 1, dres_string.size());
+            int wi = std::stoi(_w);
+            int he = std::stoi(_h);
+            if(wi < 0 || he < 0){
+                std::cerr << "Resolution can't be negative\n";
+            }
+            drawing_resolution = Vector2<unsigned int>{(unsigned)wi, (unsigned)he};
+        }
+        else{
+            drawing_resolution = Vector2<unsigned int>{1280, 720};
+        }
         const unsigned int Dim = 3;
 
 
         // get the gridsize from the user
-        ippl::Vector<int, Dim> nr = {std::atoi(argv[1]), std::atoi(argv[2]), std::atoi(argv[3])};
-        using scalar = double;
+        ippl::Vector<int, Dim> nr = {arg_extents[0], arg_extents[1], arg_extents[2]};
+        
         // get the total simulation time from the user
-        const scalar time_simulated = std::atof(argv[4]);
-        if(time_simulated <= 0){
-            std::cerr << "Time must be > 0\n";
-            goto exit;
-        }
+        
         
         using Mesh_t      = ippl::UniformCartesian<scalar, Dim>;
         using Centering_t = Mesh_t::DefaultCentering;
@@ -603,7 +709,7 @@ int main(int argc, char* argv[]) {
         bool seed = false;
 
         // define an FDTDSolver object
-        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, /*Particle count*/ 0, &radiation,seed);
+        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, /*Particle count*/ 100, &radiation,seed);
         
         using s_t = ippl::FDTDSolver<scalar, Dim>;
         s_t::VField_t::BConds_t vector_bcs;
@@ -611,7 +717,7 @@ int main(int argc, char* argv[]) {
 
         typename s_t::playout_type::RegionLayout_t const& rlayout = solver.pl.getRegionLayout();
         typename s_t::playout_type::RegionLayout_t::view_type::host_mirror_type regions_view = rlayout.gethLocalRegions();
-
+        
         Kokkos::Random_XorShift64_Pool<> rand_pool((size_t)(42 + 100 * ippl::Comm->rank()));
         {
             int rink = ippl::Comm->rank();
@@ -638,6 +744,7 @@ int main(int argc, char* argv[]) {
             int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
             (void) x;
         };
+        
         bcsetter(std::make_index_sequence<Dim * 2>{});
         solver.aN_m.setFieldBC(vector_bcs);
         solver.aNp1_m.setFieldBC(vector_bcs);
@@ -665,7 +772,7 @@ int main(int argc, char* argv[]) {
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
                     //std::cout << x << " x\n";
-                    ret[2] = -1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.2}, 0.2, 0.05);
+                    ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.2}, 0.2, 0.05);
                     (void)x;
                     (void)y;
                     (void)z;
@@ -685,10 +792,10 @@ int main(int argc, char* argv[]) {
         //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], 1, hr[0], hr[1], hr[2]);
         // time-loop
         std::vector<scalar> energies;
-        constexpr unsigned int ww = 1280, wh = 720;
-        InitWindow(ww, wh);
+        //constexpr unsigned int ww = 1280, wh = 720;
+        InitWindow(drawing_resolution.x, drawing_resolution.y);
         
-        Mesh sphere_mesh = GenMeshSphere(0.3f, 12, 12);
+        Mesh sphere_mesh = GenMeshSphere(0.02f, 12, 12);
         for (unsigned int it = 1; it < iterations; ++it) {
             if(ippl::Comm->rank() == 0)
                 LOG("Timestep number: " << it);
@@ -707,18 +814,18 @@ int main(int argc, char* argv[]) {
             //if(it > iterations / 6)
             energies.push_back(solver.total_energy);
             
-            if(true || it % 10 == 0){
+            if(draw){
                 constexpr float rotate_speed = 7.0f;
-                Vector3<float> campos{(float)(-nr[0] * std::cos(rotate_speed * (it * dt))), float(0), (float)(-nr[0] * std::sin(rotate_speed * (it * dt)))};
+                Vector3<float> campos{(float)(-1.8 * std::cos(rotate_speed * (it * dt))), float(0.5), (float)(-1.8 * std::sin(rotate_speed * (it * dt)))};
                 //Vector3<float> campos{(float)(0), float(0), (float)(-80.0)};
-                Vector3<float> center{nr[0] / 2.0f, nr[1] / 2.0f, nr[2] / 2.0f};
+                Vector3<float> center{0.5f, 0.5f, 0.5f};
                 campos = center + campos;
                 Vector3<float> look = center - campos;
                 
                 camera cam(campos, look);
                 //LOG(look << "\n");
                 //LOG(cam.look_dir() << "\n");
-                matrix_stack.push(cam.matrix(ww, wh));
+                matrix_stack.push(cam.matrix(drawing_resolution.x, drawing_resolution.y));
                 ClearBackground(Color{0, 15, 20, 255});
                 auto bview = fieldB.getView();
                 auto bunch_r_view = solver.bunch.R.getView();
@@ -741,58 +848,10 @@ int main(int argc, char* argv[]) {
                     (unsigned char)(((rankm3 >> 1) & 1) * 255),
                     (unsigned char)(((rankm3 >> 2) & 1) * 255), 255
                 };
-
-                auto ld = [lindex_lower, lindex_upper, lt](int xo, int yo, int zo, int xo2, int yo2, int zo2, Color lc){
-                    ippl::Vector<int, 3U> v[2] = {lindex_lower, lindex_upper};
-                    DrawBillboardLineEx(
-                        Vector3<float>{(float)v[xo][0]  + !!xo ,(float)v[yo][1]  + !!yo, (float)v[zo][2]  + !!zo},
-                        Vector3<float>{(float)v[xo2][0] + !!xo2,(float)v[yo2][1] + !!yo2,(float)v[zo2][2] + !!zo2}, lt, lc
-                    );
-                };
-                //Draw local cube wireframe
-                ld(0,0,0,1,0,0,lc);
-                ld(0,0,0,0,1,0,lc);
-                ld(0,0,0,0,0,1,lc);
-                ld(1,0,0,1,1,0,lc);
-                ld(1,0,0,1,0,1,lc);
-                ld(0,1,0,1,1,0,lc);
-                ld(0,1,0,0,1,1,lc);
-                ld(0,0,1,0,1,1,lc);
-                ld(0,0,1,1,0,1,lc);
-                ld(1,1,0,1,1,1,lc);
-                ld(1,0,1,1,1,1,lc);
-                ld(0,1,1,1,1,1,lc);
-
-                decltype(fieldB)::view_type::host_mirror_type bhmirror = fieldB.getHostMirror();
-                Kokkos::deep_copy(bhmirror, fieldB.getView());
-                serial_for<Dim>(KOKKOS_LAMBDA(uint64_t i, uint64_t j, uint64_t k){
-                    ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(10.0) / maxnorm_ar);
-                    i += lindex_lower[0];
-                    j += lindex_lower[1];
-                    k += lindex_lower[2];
-                    DrawBillboardLineEx(Vector3<float>{(float)i,(float)j,(float)k}, Vector3<float>{(float)(i + bv[0]),(float)(j + bv[1]),(float)(k + bv[2])}, 0.01f, jet(bv.norm()));
-                }, {0,0,0}, {bhmirror.extent(0), bhmirror.extent(1), bhmirror.extent(2)});
-
-                /*Kokkos::parallel_for(ippl::getRangePolicy(fieldB.getView()), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
-                    ippl::Vector<scalar, 3> bv = bview(i, j, k) * (scalar(10.0) / maxnorm_ar);
-                    i += lindex_lower[0];
-                    j += lindex_lower[1];
-                    k += lindex_lower[2];
-                    DrawBillboardLineEx(Vector3<float>{(float)i,(float)j,(float)k}, Vector3<float>{(float)(i + bv[0]),(float)(j + bv[1]),(float)(k + bv[2])}, 0.01f, jet(bv.norm()));
-                });*/
-
-                decltype(bunch_r_view)::host_mirror_type brmirror = Kokkos::create_mirror(bunch_r_view);
-                Kokkos::deep_copy(brmirror, bunch_r_view);
-                for(size_t i = 0;i < solver.bunch.getLocalNum();i++){
-                    ippl::Vector<scalar, 3> bv = brmirror(i);
-                    Matrix4<float> trf(1.0);
-                    trf[12] = bv[0] / hr[0] + 1.5;
-                    trf[13] = bv[1] / hr[1] + 1.5;
-                    trf[14] = bv[2] / hr[2] + 1.5;
-                    DrawMesh(sphere_mesh, trf); 
-                }
-
                 {
+                    draw_domain_wireframe(solver.layout_mp->getLocalNDIndex(),fieldB.get_mesh().getMeshSpacing(), lc, lt);
+                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), fieldB, lc, lt);
+                    draw_particle_bunch(solver.bunch, fieldB.get_mesh().getMeshSpacing(), sphere_mesh);
                     int size = ippl::Comm->size();
                     int rank = ippl::Comm->rank();
                     for (int stride = 1; stride < size; stride *= 2) {
