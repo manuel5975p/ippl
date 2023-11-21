@@ -31,7 +31,11 @@ add_compile_options (-Wno-deprecated-declarations)
 option (USE_STATIC_LIBRARIES "Link with static libraries if available" ON)
 
 message (STATUS "Build type is: " ${CMAKE_BUILD_TYPE})
-
+FetchContent_Declare(
+    pohxx
+    GIT_REPOSITORY https://github.com/Fytch/ProgramOptions.hxx
+)
+FetchContent_MakeAvailable(pohxx)
 find_package(Kokkos 4.0.0 REQUIRED)
 
 # Select flags.
@@ -87,11 +91,7 @@ if (ENABLE_UNIT_TESTS)
     add_subdirectory (unit_tests)
     #add_subdirectory(unit_tests_single_precision)
 endif ()
-FetchContent_Declare(
-    pohxx
-    GIT_REPOSITORY https://github.com/Fytch/ProgramOptions.hxx
-)
-FetchContent_MakeAvailable(pohxx)
+
 configure_file (${CMAKE_CURRENT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config_install.cmake )
 
