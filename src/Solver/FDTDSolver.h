@@ -158,17 +158,17 @@ namespace ippl {
         VField_t* radiation;
 
         // scalar and vector potentials at n-1, n, n+1 times
-        Field_t phiNm1_m;
-        Field_t phiN_m;
-        Field_t phiNp1_m;
-        VField_t aNm1_m;
-        VField_t aN_m;
-        VField_t aNp1_m;
+        //Field_t phiNm1_m;
+        //Field_t phiN_m;
+        //Field_t phiNp1_m;
+        //VField_t aNm1_m;
+        //VField_t aN_m;
+        //VField_t aNp1_m;
         
         both_potential_t ANp1_m;
         both_potential_t AN_m;
         both_potential_t ANm1_m;
-        both_field_t EBn_m;
+        //both_field_t EBn_m;
 
         // E and B fields
         VField_t* En_mp;

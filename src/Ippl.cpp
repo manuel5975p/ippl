@@ -42,7 +42,7 @@ namespace ippl {
                     if (Comm->myNode() == 0) {
                         IpplInfo::printHelp(argv);
                     }
-                    std::exit(0);
+                    // std::exit(0); //  ----> Maybe print helpscreen of derived program 
                 } else if (detail::checkOption(argv[nargs], "--info", "-i")) {
                     ++nargs;
                     if (nargs >= argc) {

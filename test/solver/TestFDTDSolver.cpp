@@ -721,8 +721,8 @@ int main(int argc, char* argv[]) {
         ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, n_particles, &radiation,seed);
         
         using s_t = ippl::FDTDSolver<scalar, Dim>;
-        s_t::VField_t::BConds_t vector_bcs;
-        s_t::Field_t::BConds_t  scalar_bcs;
+        s_t::both_potential_t::BConds_t vector_bcs;
+        //s_t::Field_t::BConds_t  scalar_bcs;
 
         typename s_t::playout_type::RegionLayout_t const& rlayout = solver.pl.getRegionLayout();
         typename s_t::playout_type::RegionLayout_t::view_type::host_mirror_type regions_view = rlayout.gethLocalRegions();
@@ -740,13 +740,12 @@ int main(int argc, char* argv[]) {
                 )
             );
         }
-        auto bcsetter_single = [&vector_bcs, &scalar_bcs, hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
+        auto bcsetter_single = [&vector_bcs, /*&scalar_bcs,*/ hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
             //vector_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::VField_t, Idx>>(Idx, hr, 1.0, dt);
             //scalar_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::Field_t , Idx>>(Idx, hr, 1.0, dt);
             //vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::VField_t>>(Idx);
             //scalar_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t:: Field_t>>(Idx);
-            vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::VField_t>>(Idx);
-            scalar_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t:: Field_t>>(Idx);
+            vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
             return 0;
         };
         auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
@@ -755,12 +754,13 @@ int main(int argc, char* argv[]) {
         };
         
         bcsetter(std::make_index_sequence<Dim * 2>{});
-        solver.aN_m.setFieldBC(vector_bcs);
-        solver.aNp1_m.setFieldBC(vector_bcs);
-        solver.aNm1_m.setFieldBC(vector_bcs);
-        solver.phiN_m.setFieldBC(scalar_bcs);
-        solver.phiNp1_m.setFieldBC(scalar_bcs);
-        solver.phiNm1_m.setFieldBC(scalar_bcs);
+
+        solver.AN_m  .setFieldBC(vector_bcs);
+        solver.ANp1_m.setFieldBC(vector_bcs);
+        solver.ANm1_m.setFieldBC(vector_bcs);
+        //solver.phiN_m.setFieldBC(scalar_bcs);
+        //solver.phiNp1_m.setFieldBC(scalar_bcs);
+        //solver.phiNm1_m.setFieldBC(scalar_bcs);
         solver.bunch.setParticleBC(ippl::NO);
         
         solver.bconds[0] = ippl::MUR_ABC_1ST;
@@ -774,8 +774,8 @@ int main(int argc, char* argv[]) {
             auto view_rho    = rho.getView();
             //const int nghost = rho.getNghost();
             //auto ldom        = layout.getLocalNDIndex();
-            auto view_a      = solver.aN_m.getView();
-            auto view_an1    = solver.aNm1_m.getView();
+            auto view_A      = solver.AN_m.getView();
+            auto view_An1    = solver.ANm1_m.getView();
             //if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
@@ -902,7 +902,6 @@ int main(int argc, char* argv[]) {
                         std::string fn = std::to_string(it + 1);
                         while(fn.size() < 4)fn = '0' + fn;
                         outputPNG(*current_fb, "iout" + fn + ".png");
-
                     }
                     //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], it + 1, hr[0], hr[1], hr[2]);
                 }
@@ -919,14 +918,13 @@ int main(int argc, char* argv[]) {
         if (!seed) {
             // add pulse at center of domain
             
-            [[maybe_unused]] auto view_rho    = rho.getView();
-            [[maybe_unused]] const int nghost = rho.getNghost();
-            [[maybe_unused]] auto ldom        = layout.getLocalNDIndex();
-            [[maybe_unused]] auto view_a      = solver.aN_m.getView();
-            [[maybe_unused]] auto view_b      = fieldB.getView();
-            [[maybe_unused]] auto view_e      = fieldE.getView();
-            
-            auto view_an1    = solver.aNm1_m.getView();
+            //[[maybe_unused]] auto view_rho    = rho.getView();
+            //[[maybe_unused]] const int nghost = rho.getNghost();
+            //[[maybe_unused]] auto ldom        = layout.getLocalNDIndex();
+            //[[maybe_unused]] auto view_a      = solver.aN_m.getView();
+            //[[maybe_unused]] auto view_b      = fieldB.getView();
+            //[[maybe_unused]] auto view_e      = fieldE.getView();
+            //auto view_an1    = solver.aNm1_m.getView();
             //Kokkos::View<double***> energy_density("Energies", view_a.extent(0), view_a.extent(1),
             //                                   view_a.extent(2));
         

@@ -570,17 +570,17 @@ namespace ippl {
                 using vector3_type = typename vector_type::rebind<typename vector_type::value_type, 3>::other;
                 using vector6_type = typename vector_type::rebind<typename vector_type::value_type, 6>::other;
 
-                vector3_type eval_grad(0);
+                vector3_type eval_grad;
                 vector6_type ret;
 
                 for (unsigned d = 0; d < 3; d++) {
                     index_type coords[3] = {i,j,k};
 
                     coords[d] += 1;
-                    auto&& right = apply(u_m, coords)[0];
+                    auto right = apply(u_m, coords)[0];
 
                     coords[d] -= 2;
-                    auto&& left = apply(u_m, coords)[0];
+                    auto left = apply(u_m, coords)[0];
 
                     eval_grad[d] = (right - left) / (2 * hvector_m[d]);
                 }

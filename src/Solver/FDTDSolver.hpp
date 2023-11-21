@@ -346,14 +346,14 @@ namespace ippl {
         //phiN_m.fillHalo();
         //phiNm1_m.fillHalo();
 
-        auto view_phiN   = phiN_m.getView();
-        auto view_phiNm1 = phiNm1_m.getView();
-        auto view_phiNp1 = phiNp1_m.getView();
+        //auto view_phiN   = phiN_m.getView();
+        //auto view_phiNm1 = phiNm1_m.getView();
+        //auto view_phiNp1 = phiNp1_m.getView();
 
         
-        auto view_aN   = aN_m.getView();
-        auto view_aNm1 = aNm1_m.getView();
-        auto view_aNp1 = aNp1_m.getView();
+        //auto view_aN   = aN_m.getView();
+        //auto view_aNm1 = aNm1_m.getView();
+        //auto view_aNp1 = aNp1_m.getView();
 
         auto view_AN   = AN_m.getView();
         auto view_ANm1 = ANm1_m.getView();
@@ -368,8 +368,7 @@ namespace ippl {
         auto view_rhoN = this->rhoN_mp->getView();
         auto view_JN   = this->JN_mp->getView();
 
-        const int nghost_phi = phiN_m.getNghost();
-        const int nghost_a   = aN_m.getNghost();
+        const int nghost_A   = AN_m.getNghost();
         const auto& ldom     = layout_mp->getLocalNDIndex();
 
         //aNm1_m.fillHalo();
@@ -428,13 +427,13 @@ namespace ippl {
         }*/
         
         Kokkos::parallel_for(
-            "4-Vector potential update", ippl::getRangePolicy(view_AN, nghost_a),
+            "4-Vector potential update", ippl::getRangePolicy(view_AN, nghost_A),
             KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                 for (size_t gd = 0; gd < Vector4_t::dim; ++gd) {
                     // global indices
-                    const int ig = i + ldom[0].first() - nghost_a;
-                    const int jg = j + ldom[1].first() - nghost_a;
-                    const int kg = k + ldom[2].first() - nghost_a;
+                    const int ig = i + ldom[0].first() - nghost_A;
+                    const int jg = j + ldom[1].first() - nghost_A;
+                    const int kg = k + ldom[2].first() - nghost_A;
 
                     // interior values
                     bool isInterior = ((ig >= 0) && (jg >= 0) && (kg >= 0) && (ig < nr_m[0])
@@ -462,12 +461,12 @@ namespace ippl {
             // the total field boundary is the 3rd point after the boundary
             for (size_t gd = 0; gd < 1; ++gd) {
                 Kokkos::parallel_for(
-                    "Vector potential seeding", ippl::getRangePolicy(view_aN, nghost_a),
+                    "Vector potential seeding", ippl::getRangePolicy(view_AN, nghost_A),
                     KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                         // global indices
-                        const size_t ig = i + ldom[0].first() - nghost_a;
-                        const size_t jg = j + ldom[1].first() - nghost_a;
-                        const size_t kg = k + ldom[2].first() - nghost_a;
+                        const size_t ig = i + ldom[0].first() - nghost_A;
+                        const size_t jg = j + ldom[1].first() - nghost_A;
+                        const size_t kg = k + ldom[2].first() - nghost_A;
 
                         size_t distance = boundary_distance(ig, jg, kg, nr_m[0], nr_m[1], nr_m[2]);
                         ippl::Vector<scalar, Dim> as{a2, a4, a6};
@@ -484,7 +483,7 @@ namespace ippl {
                         }
 
                         // update field (add seed)
-                        view_aNp1(i, j, k)[gd] += tfsfaccum;
+                        view_ANp1(i, j, k)[gd] += tfsfaccum;
                     });
             }
         }
@@ -601,20 +600,19 @@ namespace ippl {
         // we take the average of the potential at N and N+1
         auto Aview = AN_m.getView();
         auto AM1view = ANm1_m.getView();
-        auto aview = aN_m.getView();
+        //auto aview = aN_m.getView();
         auto eview = En_mp->getView();
         auto bview = Bn_mp->getView();
         const auto idt = 1.0 / dt;
         //(*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
         //(*Bn_mp) = (curl(aN_m) + curl(aNp1_m)) * 0.5;
-        
-
-        EBn_m = gradcurl(AN_m);
-        auto ebview = EBn_m.getView();
-        Kokkos::parallel_for(ippl::getRangePolicy(eview, 0), KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k){
-            eview(i, j, k) = -ebview(i, j, k).template head<3>();
-            bview(i, j, k) =  ebview(i, j, k).template tail<3>();
-            eview(i, j, k) -= (Aview(i,j,k) - AM1view(i,j,k)) * idt;
+        auto gc_expression = gradcurl(AN_m);
+        //auto ebview = EBn_m.getView();
+        Kokkos::parallel_for(ippl::getRangePolicy(eview, 1), KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k){
+            ippl::Vector<scalar, Dim * 2> gc_eval = gc_expression(i,j,k);
+            eview(i, j, k) =  gc_eval.template head<3>();
+            bview(i, j, k) =  gc_eval.template tail<3>();
+            eview(i, j, k) -= (Aview(i,j,k).template tail<3>() - AM1view(i,j,k).template tail<3>()) * idt;
         });
 
         if(radiation){
@@ -674,7 +672,7 @@ namespace ippl {
         auto gbview = bunch.gamma_beta.getView();
         
         
-        bunch.Q = electron_charge * 50.0;
+        bunch.Q = electron_charge * 500.0;
         bunch.mass = electron_mass;
         //bunch.R = ippl::Vector<scalar, 3>(0.4);
         //bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e1, 0.0};
@@ -690,26 +688,26 @@ namespace ippl {
             nr_m[i] = domain_m[i].length();
         // initialize fields
         
-        phiNm1_m.initialize(*mesh_mp, *layout_mp);
-        phiN_m.initialize(*mesh_mp, *layout_mp);
-        phiNp1_m.initialize(*mesh_mp, *layout_mp);
+        //phiNm1_m.initialize(*mesh_mp, *layout_mp);
+        //phiN_m.initialize(*mesh_mp, *layout_mp);
+        //phiNp1_m.initialize(*mesh_mp, *layout_mp);
 
-        aNm1_m.initialize(*mesh_mp, *layout_mp);
-        aN_m.initialize(*mesh_mp, *layout_mp);
-        aNp1_m.initialize(*mesh_mp, *layout_mp);
+        //aNm1_m.initialize(*mesh_mp, *layout_mp);
+        //aN_m.initialize(*mesh_mp, *layout_mp);
+        //aNp1_m.initialize(*mesh_mp, *layout_mp);
 
         ANm1_m.initialize(*mesh_mp, *layout_mp);
         AN_m.initialize(*mesh_mp, *layout_mp);
         ANp1_m.initialize(*mesh_mp, *layout_mp);
-        EBn_m.initialize(*mesh_mp, *layout_mp);
+        //EBn_m.initialize(*mesh_mp, *layout_mp);
 
-        phiNm1_m = 0.0;
-        phiN_m   = 0.0;
-        phiNp1_m = 0.0;
+        //phiNm1_m = 0.0;
+        //phiN_m   = 0.0;
+        //phiNp1_m = 0.0;
 
-        aNm1_m = 0.0;
-        aN_m   = 0.0;
-        aNp1_m = 0.0;
+        //aNm1_m = 0.0;
+        //aN_m   = 0.0;
+        //aNp1_m = 0.0;
 
         ANm1_m = 0.0;
         AN_m   = 0.0;
@@ -718,27 +716,24 @@ namespace ippl {
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
     void FDTDSolver<Tfields, Dim, M, C>::apply_to_fields(callable c){
-        c(aN_m);
-        c(aNp1_m);
-        c(aNm1_m);
-        c(phiN_m);
-        c(phiNp1_m);
-        c(phiNm1_m);
+        c(AN_m);
+        c(ANp1_m);
+        c(ANm1_m);
     }
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
     void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(callable c){
-        auto view_a      = aN_m  .getView();
-        auto view_an1    = aNm1_m.getView();
+        //auto view_a      = aN_m  .getView();
+        //auto view_an1    = aNm1_m.getView();
         auto view_A      = AN_m  .getView();
         auto view_An1    = ANm1_m.getView();
-        auto view_phi    = phiN_m.getView();
-        auto view_phin1  = phiNm1_m.getView();
+        //auto view_phi    = phiN_m.getView();
+        //auto view_phin1  = phiNm1_m.getView();
         auto ldom = layout_mp->getLocalNDIndex();
         //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
-        int nghost = aN_m.getNghost();
+        int nghost = AN_m.getNghost();
         Kokkos::parallel_for(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a, nghost), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_A, nghost), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;
@@ -748,13 +743,14 @@ namespace ippl {
                 scalar z = (scalar(kg) + 0.5) * hr_m[2];// + origin[2];
                 //view_a  (i, j, k) = c(x, y, z);
                 //view_an1(i, j, k) = c(x, y, z);
-                view_phi(i,j,k)   = 0.0;
-                view_phin1(i,j,k) = 0.0;
-                view_a  (i, j, k) = c(x, y, z);
-                view_an1(i, j, k) = c(x, y, z);
+                //view_phi(i,j,k)   = 0.0;
+                //view_phin1(i,j,k) = 0.0;
+                //view_a  (i, j, k) = c(x, y, z);
+                //view_an1(i, j, k) = c(x, y, z);
                 for(int l = 0;l < 3;l++){
-                    view_A  (i, j, k)[l + 1] = view_a  (i, j, k)[l];
-                    view_An1(i, j, k)[l + 1] = view_an1(i, j, k)[l];
+                    view_A  (i, j, k)[l + 1] = c(x, y, z)[l];
+                    view_An1(i, j, k)[l + 1] = c(x, y, z)[l];
+                    
                 }
             }
         );
@@ -762,14 +758,14 @@ namespace ippl {
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
     Tfields FDTDSolver<Tfields, Dim, M, C>::volumetric_integral(callable c){
-        auto view_a      = aN_m.getView();
-        auto view_an1    = aNm1_m.getView();
+        auto view_A      = AN_m.getView();
+        //auto view_an1    = aNm1_m.getView();
         auto ldom = layout_mp->getLocalNDIndex();
-        int nghost = aN_m.getNghost();
+        int nghost = AN_m.getNghost();
         Tfields ret = 0.0;
         Tfields volume = hr_m[0] * hr_m[1] * hr_m[2];
         Kokkos::parallel_reduce(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_a), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k, scalar& ref){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_A), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k, scalar& ref){
                 
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
