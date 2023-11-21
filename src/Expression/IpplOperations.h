@@ -20,6 +20,7 @@
 
 #include <Kokkos_MathematicalFunctions.hpp>
 #include <concepts>
+#include <Types/Vector.h>
 #include <tuple>
 
 namespace ippl {
@@ -522,6 +523,83 @@ namespace ippl {
                        + zvector_m
                              * ((u_m(i + 1, j, k)[1] - u_m(i - 1, j, k)[1]) / (2 * hvector_m[0])
                                 - (u_m(i, j + 1, k)[0] - u_m(i, j - 1, k)[0]) / (2 * hvector_m[1]));
+            }
+
+        private:
+            using Mesh_t      = typename E::Mesh_t;
+            using vector_type = typename Mesh_t::vector_type;
+            const E u_m;
+            const vector_type xvector_m;
+            const vector_type yvector_m;
+            const vector_type zvector_m;
+            const vector_type hvector_m;
+        };
+
+        template <typename E>
+        struct meta_gradcurl
+            : public Expression<meta_gradcurl<E>,
+                                sizeof(E) + 4 * sizeof(typename E::Mesh_t::vector_type)> {
+            constexpr static unsigned dim = E::dim;
+
+            KOKKOS_FUNCTION
+            meta_gradcurl(const E& u, const typename E::Mesh_t::vector_type& xvector,
+                      const typename E::Mesh_t::vector_type& yvector,
+                      const typename E::Mesh_t::vector_type& zvector,
+                      const typename E::Mesh_t::vector_type& hvector)
+                : u_m(u)
+                , xvector_m(xvector)
+                , yvector_m(yvector)
+                , zvector_m(zvector)
+                , hvector_m(hvector) {}
+
+            /**
+             * @brief HARDCODED TO 3 DIMENSIONS! Calculates the gradient and curl of a vector field at a given position.
+             *
+             * This function is designed to operate on a vector field represented by the 'u_m' object.
+             * It computes the gradient of the first component and curl of the latter three at the specified position (i, j, k) in three-dimensional space.
+             *
+             * @param i The index along the x-axis.
+             * @param j The index along the y-axis.
+             * @param k The index along the z-axis.
+             *
+             * @return A vector containing the computed gradient and curl components.
+             *         The first 'dim' elements represent the gradient, and the next 'dim' elements represent the curl.
+             */
+            KOKKOS_INLINE_FUNCTION auto operator()(size_t i, size_t j, size_t k) const {
+                using index_type = size_t;
+                using vector3_type = typename vector_type::rebind<typename vector_type::value_type, 3>::other;
+                using vector6_type = typename vector_type::rebind<typename vector_type::value_type, 6>::other;
+
+                vector3_type eval_grad(0);
+                vector6_type ret;
+
+                for (unsigned d = 0; d < 3; d++) {
+                    index_type coords[3] = {i,j,k};
+
+                    coords[d] += 1;
+                    auto&& right = apply(u_m, coords)[0];
+
+                    coords[d] -= 2;
+                    auto&& left = apply(u_m, coords)[0];
+
+                    eval_grad[d] = (right - left) / (2 * hvector_m[d]);
+                }
+
+                vector3_type eval_curl = xvector_m
+                           * ((u_m(i, j + 1, k)  [3] - u_m(i, j - 1, k)[3]) / (2 * hvector_m[1])
+                              - (u_m(i, j, k + 1)[2] - u_m(i, j, k - 1)[2]) / (2 * hvector_m[2]))
+                       + yvector_m
+                             * ((u_m(i, j, k + 1)  [1] - u_m(i, j, k - 1)[1]) / (2 * hvector_m[2])
+                                - (u_m(i + 1, j, k)[3] - u_m(i - 1, j, k)[3]) / (2 * hvector_m[0]))
+                       + zvector_m
+                             * ((u_m(i + 1, j, k)  [2] - u_m(i - 1, j, k)[2]) / (2 * hvector_m[0])
+                                - (u_m(i, j + 1, k)[1] - u_m(i, j - 1, k)[1]) / (2 * hvector_m[1]));
+                
+                for (unsigned d = 0;d < 3;d++){
+                    ret[d] = eval_grad[d];
+                    ret[d + 3] = eval_curl[d];
+                }
+                return ret;
             }
 
         private:

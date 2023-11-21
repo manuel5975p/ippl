@@ -138,6 +138,24 @@ namespace ippl {
         }
         return *this;
     }
+    template <typename T, unsigned Dim>
+    template<unsigned int ND>
+    KOKKOS_INLINE_FUNCTION Vector<T, ND> Vector<T, Dim>::head()const{
+        Vector<T, ND> ret;
+        for(unsigned i = 0;i < ND;i++){
+            ret[i] = (*this)[i];
+        }
+        return ret;
+    }
+    template <typename T, unsigned Dim>
+    template<unsigned int ND>
+    KOKKOS_INLINE_FUNCTION Vector<T, ND> Vector<T, Dim>::tail()const{
+        Vector<T, ND> ret;
+        for(unsigned i = 0;i < ND;i++){
+            ret[i] = (*this)[Dim - i - 1];
+        }
+        return ret;
+    }
 
     template <typename T, unsigned Dim>
     KOKKOS_INLINE_FUNCTION constexpr typename Vector<T, Dim>::iterator Vector<T, Dim>::begin() {

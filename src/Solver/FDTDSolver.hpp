@@ -336,12 +336,15 @@ namespace ippl {
 
         //static_assert(std::is_invocable_v<ippl::Vector<scalar, 3>, int>);
         // preliminaries for Kokkos loops (ghost cells and views)
-        phiNp1_m         = scalar(0);
-        aNp1_m           = scalar(0);
-        aN_m.fillHalo();
-        aNm1_m.fillHalo();
-        phiN_m.fillHalo();
-        phiNm1_m.fillHalo();
+        //phiNp1_m         = scalar(0);
+        //aNp1_m           = scalar(0);
+        ANp1_m           = scalar(0);
+        AN_m.fillHalo();
+        ANm1_m.fillHalo();
+        //aN_m.fillHalo();
+        //aNm1_m.fillHalo();
+        //phiN_m.fillHalo();
+        //phiNm1_m.fillHalo();
 
         auto view_phiN   = phiN_m.getView();
         auto view_phiNm1 = phiNm1_m.getView();
@@ -351,6 +354,12 @@ namespace ippl {
         auto view_aN   = aN_m.getView();
         auto view_aNm1 = aNm1_m.getView();
         auto view_aNp1 = aNp1_m.getView();
+
+        auto view_AN   = AN_m.getView();
+        auto view_ANm1 = ANm1_m.getView();
+        auto view_ANp1 = ANp1_m.getView();
+
+
         #define _bc first_order_abc<scalar,
         _bc 0, 1, 2> abc_x[] = {_bc 0, 1, 2> (hr_m, c, dt,  1), _bc 0, 1, 2>(hr_m, c, dt, -1)};
         _bc 1, 0, 2> abc_y[] = {_bc 1, 0, 2> (hr_m, c, dt,  1), _bc 1, 0, 2>(hr_m, c, dt, -1)};
@@ -372,7 +381,7 @@ namespace ippl {
         // then, if the user has set a seed, the seed is added via TF/SF boundaries
         // (TF/SF = total-field/scattered-field technique)
         // finally, absorbing boundary conditions are imposed
-        Kokkos::parallel_for(
+        /*Kokkos::parallel_for(
             "Scalar potential update", ippl::getRangePolicy(view_phiN, nghost_phi),
             KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                 // global indices
@@ -416,7 +425,31 @@ namespace ippl {
                     view_aNp1(i, j, k)[gd] =
                         isInterior * interior + !isInterior * view_aNp1(i, j, k)[gd];
                 });
-        }
+        }*/
+        
+        Kokkos::parallel_for(
+            "4-Vector potential update", ippl::getRangePolicy(view_AN, nghost_a),
+            KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+                for (size_t gd = 0; gd < Vector4_t::dim; ++gd) {
+                    // global indices
+                    const int ig = i + ldom[0].first() - nghost_a;
+                    const int jg = j + ldom[1].first() - nghost_a;
+                    const int kg = k + ldom[2].first() - nghost_a;
+
+                    // interior values
+                    bool isInterior = ((ig >= 0) && (jg >= 0) && (kg >= 0) && (ig < nr_m[0])
+                                           && (jg < nr_m[1]) && (kg < nr_m[2]));
+                    scalar interior = -view_ANm1(i, j, k)[gd] + a1 * view_AN(i, j, k)[gd]
+                                      + a2 * (view_AN(i + 1, j, k)[gd] + view_AN(i - 1, j, k)[gd])
+                                      + a4 * (view_AN(i, j + 1, k)[gd] + view_AN(i, j - 1, k)[gd])
+                                      + a6 * (view_AN(i, j, k + 1)[gd] + view_AN(i, j, k - 1)[gd])
+                                      + a8 * (gd == 0 ? (-view_rhoN(i, j, k) / epsilon0) : (-view_JN(i, j, k)[gd - 1] * mu0));
+                    
+                    view_ANp1(i, j, k)[gd] =
+                        isInterior * interior + !isInterior * view_ANp1(i, j, k)[gd];
+                }
+            }
+        );
 
         // interior points need to have been updated before TF/SF seed and ABCs
         Kokkos::fence();
@@ -459,12 +492,14 @@ namespace ippl {
             
         // apply 1st order Absorbing Boundary Conditions
         // for both scalar and vector potentials
-        for (size_t gd = 0; gd < 3; ++gd) {
-            if(this->bconds[gd] != MUR_ABC_1ST)continue;
-            ippl::Vector<size_t, 3> extenz = ippl::Vector<size_t, 3>{(size_t)nr_m[0] + 2, (size_t)nr_m[1] + 2, (size_t)nr_m[2] + 2};
-            Kokkos::parallel_for(
-                "Vector potential ABCs", ippl::getRangePolicy(view_aN /*, nghost_a*/),
-                KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+        
+        ippl::Vector<size_t, 3> extenz = ippl::Vector<size_t, 3>{(size_t)nr_m[0] + 2, (size_t)nr_m[1] + 2, (size_t)nr_m[2] + 2};
+        
+        Kokkos::parallel_for(
+            "Vector potential ABCs", ippl::getRangePolicy(view_AN /*, nghost_a*/),
+            KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+                for (size_t gd = 0; gd < 3; ++gd) {
+                    if(this->bconds[gd] != MUR_ABC_1ST)continue;
                     // global indices
                     const int ig = i + ldom[0].first();// - nghost_a;
                     const int jg = j + ldom[1].first();// - nghost_a;
@@ -477,24 +512,27 @@ namespace ippl {
                     if(+bocc[gd]){
                         int offs = bocc[gd] == AT_MIN ? 1 : -1;
                         if(gd == 0){
-                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
-                            view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
+                            view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i + offs, j, k) - view_AN(i, j, k)) * this->dt / hr_m[0];
+                            //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
+                            //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
                             //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 1){
-                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
-                            view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
+                            view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j + offs, k) - view_AN(i, j, k)) * this->dt / hr_m[1];
+                            //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
+                            //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
                             //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 2){
-                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
-                            view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
+                            view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j, k + offs) - view_AN(i, j, k)) * this->dt / hr_m[2];
+                            //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
+                            //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
                             //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                     }
                 }
-            );
-        }
+            }
+        );
         Kokkos::fence();
         field_evaluation();
         auto gammabeta_view = bunch.gamma_beta.getView();
@@ -549,31 +587,46 @@ namespace ippl {
         bunch_type bunch_buffer(pl);
         pl.update(bunch, bunch_buffer);
         //Copy potential at N-1 and N+1 to phiNm1 and phiN for next time step
-        Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
-        Kokkos::deep_copy(aN_m.getView(), aNp1_m.getView());
-        Kokkos::deep_copy(phiNm1_m.getView(), phiN_m.getView());
-        Kokkos::deep_copy(phiN_m.getView(), phiNp1_m.getView()); 
+        Kokkos::deep_copy(ANm1_m.getView(), AN_m.getView());
+        Kokkos::deep_copy(AN_m.getView(),   ANp1_m.getView());
+        //Kokkos::deep_copy(aNm1_m.getView(), aN_m.getView());
+        //Kokkos::deep_copy(aN_m.getView(), aNp1_m.getView());
+        //Kokkos::deep_copy(phiNm1_m.getView(), phiN_m.getView());
+        //Kokkos::deep_copy(phiN_m.getView(), phiNp1_m.getView()); 
     };
 
     template <typename Tfields, unsigned Dim, class M, class C>
     Tfields FDTDSolver<Tfields, Dim, M, C>::field_evaluation() {
         // magnetic field is the curl of the vector potential
         // we take the average of the potential at N and N+1
+        auto Aview = AN_m.getView();
+        auto AM1view = ANm1_m.getView();
+        auto aview = aN_m.getView();
+        auto eview = En_mp->getView();
+        auto bview = Bn_mp->getView();
+        const auto idt = 1.0 / dt;
+        //(*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
+        //(*Bn_mp) = (curl(aN_m) + curl(aNp1_m)) * 0.5;
+        
 
-        (*En_mp) = -(aNp1_m - aN_m) / dt - grad(phiN_m);
-        (*Bn_mp) = (curl(aN_m) + curl(aNp1_m)) * 0.5;
+        EBn_m = gradcurl(AN_m);
+        auto ebview = EBn_m.getView();
+        Kokkos::parallel_for(ippl::getRangePolicy(eview, 0), KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k){
+            eview(i, j, k) = -ebview(i, j, k).template head<3>();
+            bview(i, j, k) =  ebview(i, j, k).template tail<3>();
+            eview(i, j, k) -= (Aview(i,j,k) - AM1view(i,j,k)) * idt;
+        });
+
         if(radiation){
             (*radiation) = ippl::cross(*En_mp, *Bn_mp);
         }
 
         //typename FDTDSolver<Tfields, Dim, M, C>::Field_t energy_density = phiN_m.deepCopy();
         //auto edview = energy_density.getView();
-        auto aview = aN_m.getView();
-        auto eview = En_mp->getView();
-        auto bview = Bn_mp->getView();
+        
         scalar eb_energy = 0.0;
         
-        Kokkos::parallel_reduce(aN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k, scalar& ref){
+        Kokkos::parallel_reduce(AN_m.getFieldRangePolicy(), KOKKOS_LAMBDA(int i, int j, int k, scalar& ref){
             //edview(i,j,k) = aview(i,j,k)[2];
             //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
             ref += squaredNorm(eview(i, j, k));
@@ -636,6 +689,7 @@ namespace ippl {
         for (unsigned int i = 0; i < Dim; ++i)
             nr_m[i] = domain_m[i].length();
         // initialize fields
+        
         phiNm1_m.initialize(*mesh_mp, *layout_mp);
         phiN_m.initialize(*mesh_mp, *layout_mp);
         phiNp1_m.initialize(*mesh_mp, *layout_mp);
@@ -644,6 +698,11 @@ namespace ippl {
         aN_m.initialize(*mesh_mp, *layout_mp);
         aNp1_m.initialize(*mesh_mp, *layout_mp);
 
+        ANm1_m.initialize(*mesh_mp, *layout_mp);
+        AN_m.initialize(*mesh_mp, *layout_mp);
+        ANp1_m.initialize(*mesh_mp, *layout_mp);
+        EBn_m.initialize(*mesh_mp, *layout_mp);
+
         phiNm1_m = 0.0;
         phiN_m   = 0.0;
         phiNp1_m = 0.0;
@@ -651,6 +710,10 @@ namespace ippl {
         aNm1_m = 0.0;
         aN_m   = 0.0;
         aNp1_m = 0.0;
+
+        ANm1_m = 0.0;
+        AN_m   = 0.0;
+        ANp1_m = 0.0;
     };
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
@@ -665,10 +728,12 @@ namespace ippl {
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
     void FDTDSolver<Tfields, Dim, M, C>::fill_initialcondition(callable c){
-        auto view_a      = aN_m.getView();
-        auto view_phi      = phiN_m.getView();
+        auto view_a      = aN_m  .getView();
         auto view_an1    = aNm1_m.getView();
-        auto view_phin1    = phiNm1_m.getView();
+        auto view_A      = AN_m  .getView();
+        auto view_An1    = ANm1_m.getView();
+        auto view_phi    = phiN_m.getView();
+        auto view_phin1  = phiNm1_m.getView();
         auto ldom = layout_mp->getLocalNDIndex();
         //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = aN_m.getNghost();
@@ -683,10 +748,14 @@ namespace ippl {
                 scalar z = (scalar(kg) + 0.5) * hr_m[2];// + origin[2];
                 //view_a  (i, j, k) = c(x, y, z);
                 //view_an1(i, j, k) = c(x, y, z);
-                view_phi(i,j,k) = 0.0;
+                view_phi(i,j,k)   = 0.0;
                 view_phin1(i,j,k) = 0.0;
                 view_a  (i, j, k) = c(x, y, z);
                 view_an1(i, j, k) = c(x, y, z);
+                for(int l = 0;l < 3;l++){
+                    view_A  (i, j, k)[l + 1] = view_a  (i, j, k)[l];
+                    view_An1(i, j, k)[l + 1] = view_an1(i, j, k)[l];
+                }
             }
         );
     }

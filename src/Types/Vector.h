@@ -85,6 +85,12 @@ namespace ippl {
         template <typename E, size_t N>
         KOKKOS_INLINE_FUNCTION Vector<T, Dim>& operator/=(const detail::Expression<E, N>& expr);
 
+        template<unsigned int ND>
+        KOKKOS_INLINE_FUNCTION Vector<T, ND> head()const;
+
+        template<unsigned int ND>
+        KOKKOS_INLINE_FUNCTION Vector<T, ND> tail()const;
+
         using iterator       = T*;
         using const_iterator = const T*;
         KOKKOS_INLINE_FUNCTION constexpr iterator begin();
@@ -93,6 +99,11 @@ namespace ippl {
         KOKKOS_INLINE_FUNCTION constexpr const_iterator end() const;
         KOKKOS_INLINE_FUNCTION T squaredNorm() const;
         KOKKOS_INLINE_FUNCTION T norm() const;
+
+        template<typename otherT, unsigned otherDim>
+        struct rebind{
+            using other = Vector<otherT, otherDim>;
+        };
     private:
         T data_m[Dim];
     };

@@ -73,9 +73,16 @@ namespace ippl {
         // define a type for scalar field (e.g. charge density field)
         // define a type for vectors
         // define a type for vector field
-        typedef Field<Tfields, Dim, M, C> Field_t;
-        typedef Vector<Tfields, Dim> Vector_t;
-        typedef Field<Vector_t, Dim, M, C> VField_t;
+        // define a type for scalar and vector field (e.g. 4-potential)
+        typedef Vector<Tfields, Dim        > Vector_t;
+        typedef Vector<Tfields, Dim + 1    > Vector4_t;
+        typedef Vector<Tfields, Dim * 2    > Vector6_t;
+        
+        typedef Field <Tfields, Dim, M, C  > Field_t;
+        
+        typedef Field <Vector_t, Dim, M, C > VField_t;
+        typedef Field <Vector4_t, Dim, M, C> both_potential_t;
+        typedef Field <Vector6_t, Dim, M, C> both_field_t;
 
         ippl::Vector<ippl::FieldBC, Dim> bconds;
         using memory_space = typename Field_t::memory_space;
@@ -106,12 +113,19 @@ namespace ippl {
         template<typename callable>
         void apply_to_fields(callable c);
         /**
-         *
+         * @brief Fill A with an initial condition
          * @param c the callable object used to fill the initial condition
          *
          */
         template<typename callable>
         void fill_initialcondition(callable c);
+
+        /**
+         * @brief Accumulates a quantity described by a callable object.
+         * This function accumulates a quantity by applying the provided callable object, 'c'.
+         * @param c The callable object used to fill the initial condition.
+         * @return The accumulated quantity.
+         */
         template<typename callable>
         Tfields volumetric_integral(callable c);
 
@@ -150,6 +164,11 @@ namespace ippl {
         VField_t aNm1_m;
         VField_t aN_m;
         VField_t aNp1_m;
+        
+        both_potential_t ANp1_m;
+        both_potential_t AN_m;
+        both_potential_t ANm1_m;
+        both_field_t EBn_m;
 
         // E and B fields
         VField_t* En_mp;

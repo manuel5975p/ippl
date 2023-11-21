@@ -111,6 +111,27 @@ namespace ippl {
         return detail::meta_curl<Field>(u, xvector, yvector, zvector, hvector);
     }
 
+    template <typename Field>
+    detail::meta_gradcurl<Field> gradcurl(Field& u) {
+        constexpr unsigned Dim = Field::dim;
+
+        u.fillHalo();
+        BConds<Field, Dim>& bcField = u.getFieldBC();
+        bcField.apply(u);
+
+        using mesh_type = typename Field::Mesh_t;
+        mesh_type& mesh = u.get_mesh();
+        typename mesh_type::vector_type xvector(0);
+        xvector[0] = 1.0;
+        typename mesh_type::vector_type yvector(0);
+        yvector[1] = 1.0;
+        typename mesh_type::vector_type zvector(0);
+        zvector[2] = 1.0;
+        typename mesh_type::vector_type hvector(0);
+        hvector = mesh.getMeshSpacing();
+        return detail::meta_gradcurl<Field>(u, xvector, yvector, zvector, hvector);
+    }
+
     /*!
      * User interface of Hessian in three dimensions.
      * @param u field

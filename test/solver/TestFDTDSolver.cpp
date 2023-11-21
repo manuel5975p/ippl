@@ -593,9 +593,11 @@ int main(int argc, char* argv[]) {
         po::parser parser;
         std::vector<int> arg_extents;
         std::string dres_string;
+        int n_particles;
         Vector2<unsigned int> drawing_resolution;
         auto& drawopt = parser["draw"].abbreviation('d').description("Export a frame every step [bool]");
         auto& resopt = parser["resolution"].abbreviation('r').description("Export frame resolution [int x int]").bind(dres_string);
+        auto& partopt = parser["particles"].abbreviation('p').description("Number of particles (default 0) [int]").bind(n_particles);
         auto& vtkopt = parser["vtk"].description("Export a vtk every step [bool]");
         auto& timeopt = parser["time"].abbreviation('t').description("Simulation duration (default 1.5) [scalar]").bind(time_simulated);
         parser[""].description("Dimensions").description("Number of physical grid-cells in each dimension").bind(arg_extents);
@@ -619,6 +621,14 @@ int main(int argc, char* argv[]) {
             std::cerr << "Time must be > 0\n";
             goto exit;
         }
+        if(!partopt.was_set()){
+            n_particles = 0;
+        }
+        else if(n_particles < 0){
+            std::cerr << "Number of must be >= 0\n";
+            goto exit;
+        }
+        
         if(resopt.was_set()){
             size_t x = dres_string.find('x');
             if(x == std::string::npos || x == dres_string.size()){
@@ -644,7 +654,6 @@ int main(int argc, char* argv[]) {
         ippl::Vector<int, Dim> nr = {arg_extents[0], arg_extents[1], arg_extents[2]};
         
         // get the total simulation time from the user
-        
         
         using Mesh_t      = ippl::UniformCartesian<scalar, Dim>;
         using Centering_t = Mesh_t::DefaultCentering;
@@ -709,7 +718,7 @@ int main(int argc, char* argv[]) {
         bool seed = false;
 
         // define an FDTDSolver object
-        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, /*Particle count*/ 100, &radiation,seed);
+        ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, n_particles, &radiation,seed);
         
         using s_t = ippl::FDTDSolver<scalar, Dim>;
         s_t::VField_t::BConds_t vector_bcs;

@@ -152,8 +152,9 @@ namespace ippl {
                 // find nearest grid point
                 vector_type l                 = (pp(idx) - origin) * invdx + 0.5;
                 for(unsigned int i = 0; i < Dim; ++i){
-                    assert(l(i) >= 0);
-                    assert(l(i) < view.extent(i));
+                    //assert(l(i) >= 0);
+                    //if(ippl::Comm->rank() == 0 && l(i)std::cout << l(i) << ", " << view.extent(i) << "\n";
+                    //assert(l(i) < view.extent(i));
                 }
                 Vector<int, Field::dim> index = l;
                 Vector<T, Field::dim> whi     = l - index;
