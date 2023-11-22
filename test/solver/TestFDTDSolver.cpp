@@ -686,6 +686,7 @@ int main(int argc, char* argv[]) {
         scalar dy                        = scalar(1.0) / nr[1];
         scalar dz                        = scalar(1.0) / nr[2];
         ippl::Vector<scalar, Dim> hr     = {dx, dy, dz};
+        //std::cout << dx << " " << dy << " " << dz << " dv\n";
         ippl::Vector<scalar, Dim> origin = {0.0, 0.0, 0.0};
         Mesh_t mesh(owned, hr, origin);
         
@@ -747,11 +748,8 @@ int main(int argc, char* argv[]) {
             );
         }
         auto bcsetter_single = [&vector_bcs, /*&scalar_bcs,*/ hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
-            //vector_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::VField_t, Idx>>(Idx, hr, 1.0, dt);
-            //scalar_bcs[Idx] = std::make_shared<ippl::MurABC1st<s_t::Field_t , Idx>>(Idx, hr, 1.0, dt);
-            //vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::VField_t>>(Idx);
-            //scalar_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t:: Field_t>>(Idx);
-            vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
+            vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::both_potential_t>>(Idx);
+            //vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
             return 0;
         };
         auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
@@ -767,11 +765,11 @@ int main(int argc, char* argv[]) {
         //solver.phiN_m.setFieldBC(scalar_bcs);
         //solver.phiNp1_m.setFieldBC(scalar_bcs);
         //solver.phiNm1_m.setFieldBC(scalar_bcs);
-        solver.bunch.setParticleBC(ippl::NO);
+        solver.bunch.setParticleBC(ippl::PERIODIC);
         
-        solver.bconds[0] = ippl::MUR_ABC_1ST;
-        solver.bconds[1] = ippl::MUR_ABC_1ST;
-        solver.bconds[2] = ippl::MUR_ABC_1ST;
+        solver.bconds[0] = ippl::PERIODIC_FACE;
+        solver.bconds[1] = ippl::PERIODIC_FACE;
+        solver.bconds[2] = ippl::PERIODIC_FACE;
         //decltype(solver)::bunch_type bunch_buffer(solver.pl);
         //solver.pl.update(solver.bunch, bunch_buffer);
         if (!seed) {
@@ -787,7 +785,7 @@ int main(int argc, char* argv[]) {
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
                     ippl::Vector<scalar, 3> ret(0.0);
                     //std::cout << x << " x\n";
-                    ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.2}, 0.2, 0.05);
+                    ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.1);
                     (void)x;
                     (void)y;
                     (void)z;
@@ -832,7 +830,7 @@ int main(int argc, char* argv[]) {
             
             if(draw){
                 constexpr float rotate_speed = 7.0f;
-                Vector3<float> campos{(float)(-1.8 * std::cos(rotate_speed * (it * dt))), float(0.5), (float)(-1.8 * std::sin(rotate_speed * (it * dt)))};
+                Vector3<float> campos{(float)(-1.3 * std::cos(rotate_speed * (it * dt))), float(0.5), (float)(-1.3 * std::sin(rotate_speed * (it * dt)))};
                 //Vector3<float> campos{(float)(0), float(0), (float)(-80.0)};
                 Vector3<float> center{0.5f, 0.5f, 0.5f};
                 campos = center + campos;
@@ -857,7 +855,7 @@ int main(int argc, char* argv[]) {
                 //DrawBillboardLineEx(Vector3<float>{0,0,0}, Vector3<float>{0,1,0}, 0.05f, Color{255,255,0,255});
                 auto lindex_lower = solver.layout_mp->getLocalNDIndex().first();
                 auto lindex_upper = solver.layout_mp->getLocalNDIndex().last();
-                constexpr float lt = 0.01;
+                constexpr float lt = 0.003;
                 int rankm3 = ippl::Comm->rank() % 8;
                 Color lc{
                     (unsigned char)((rankm3 & 1) * 255),

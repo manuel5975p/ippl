@@ -152,7 +152,7 @@ namespace ippl {
     KOKKOS_INLINE_FUNCTION Vector<T, ND> Vector<T, Dim>::tail()const{
         Vector<T, ND> ret;
         for(unsigned i = 0;i < ND;i++){
-            ret[i] = (*this)[Dim - i - 1];
+            ret[i] = (*this)[Dim - ND + i];
         }
         return ret;
     }
