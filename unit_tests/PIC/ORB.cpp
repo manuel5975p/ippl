@@ -2,19 +2,6 @@
 // Unit tests ORB for class OrthogonalRecursiveBisection
 //   Test volume and charge conservation in PIC operations.
 //
-// Copyright (c) 2021, Michael Ligotino, ETH, Zurich;
-// Paul Scherrer Institut, Villigen; Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
 #include "Ippl.h"
 
@@ -33,6 +20,7 @@ protected:
 
 public:
     constexpr static unsigned dim = Dim;
+    using value_type              = T;
 
     using mesh_type      = ippl::UniformCartesian<double, Dim>;
     using centering_type = typename mesh_type::DefaultCentering;
@@ -143,18 +131,16 @@ TYPED_TEST_CASE(ORBTest, Tests);
 TYPED_TEST(ORBTest, Volume) {
     constexpr unsigned Dim = TestFixture::dim;
 
-    auto& pl     = this->playout;
     auto& bunch  = this->bunch;
     auto& layout = this->layout;
 
     ippl::NDIndex<Dim> dom = layout.getDomain();
-    typename TestFixture::bunch_type buffer(pl);
 
-    pl.update(*bunch, buffer);
+    bunch->update();
 
     this->repartition();
 
-    pl.update(*bunch, buffer);
+    bunch->update();
 
     ippl::NDIndex<Dim> ndom = layout.getDomain();
 
@@ -162,28 +148,26 @@ TYPED_TEST(ORBTest, Volume) {
 }
 
 TYPED_TEST(ORBTest, Charge) {
-    auto& pl    = this->playout;
     auto& bunch = this->bunch;
     auto& field = this->field;
-
-    typename TestFixture::bunch_type buffer(pl);
 
     double charge = 0.5;
 
     bunch->Q = charge;
 
-    pl.update(*bunch, buffer);
+    bunch->update();
 
     this->repartition();
 
-    pl.update(*bunch, buffer);
+    bunch->update();
 
     *field = 0.0;
     scatter(bunch->Q, *field, bunch->R);
 
     double totalCharge = field->sum();
 
-    ASSERT_NEAR((this->nParticles * charge - totalCharge) / totalCharge, 0., 1e-13);
+    ASSERT_NEAR((this->nParticles * charge - totalCharge) / totalCharge, 0.,
+                tolerance<typename TestFixture::value_type>);
 }
 
 int main(int argc, char* argv[]) {

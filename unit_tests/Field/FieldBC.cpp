@@ -2,19 +2,6 @@
 // Unit test FieldBC
 //   Test field boundary conditions.
 //
-// Copyright (c) 2020, Sriramkrishnan Muralikrishnan,
-// Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
 #include "Ippl.h"
 
@@ -38,7 +25,7 @@ public:
 
     using mesh_type      = ippl::UniformCartesian<T, Dim>;
     using centering_type = typename mesh_type::DefaultCentering;
-    using field_type     = ippl::Field<T, Dim, mesh_type, centering_type>;
+    using field_type     = ippl::Field<T, Dim, mesh_type, centering_type, ExecSpace>;
     using bc_type        = ippl::BConds<field_type, Dim>;
 
     FieldBCTest()
@@ -96,18 +83,16 @@ public:
                     return dim == d ? 2 : HostF.extent(dim) - 1;
                 },
                 [&]<typename... Idx>(const Idx... args) {
-                    // to avoid ambiguity with MultirankUtils::apply
-                    using ippl::apply;
                     using index_type = std::tuple_element_t<0, std::tuple<Idx...>>;
 
                     index_type coords[Dim] = {args...};
                     if (checkLower) {
                         coords[d] = 0;
-                        EXPECT_DOUBLE_EQ(expected, apply(HostF, coords));
+                        EXPECT_DOUBLE_EQ(expected, ippl::apply(HostF, coords));
                     }
                     if (checkUpper) {
                         coords[d] = N - 1;
-                        EXPECT_DOUBLE_EQ(expected, apply(HostF, coords));
+                        EXPECT_DOUBLE_EQ(expected, ippl::apply(HostF, coords));
                     }
                 });
         }

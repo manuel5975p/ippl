@@ -2,19 +2,6 @@
 // Unit test FFT
 //   Test FFT features
 //
-// Copyright (c) 2023, Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 #include "Ippl.h"
 
 #include <Kokkos_MathematicalConstants.hpp>
@@ -138,7 +125,7 @@ public:
     template <typename MirrorA, typename MirrorB>
     void verifyResult(int nghost, const MirrorA& computed, const MirrorB& expected) {
         T max_error_local = 0.0;
-        T tol             = (std::is_same_v<T, double>) ? 1e-13 : 1e-6;
+        T tol             = tolerance<T>;
         nestedViewLoop(computed, nghost, [&]<typename... Idx>(const Idx... args) {
             T error = std::fabs(expected(args...) - computed(args...));
 
@@ -254,7 +241,7 @@ TYPED_TEST(FFTTest, RC) {
 
 TYPED_TEST(FFTTest, CC) {
     using T = typename TestFixture::value_type;
-    T tol   = (std::is_same_v<T, double>) ? 1e-13 : 1e-6;
+    T tol   = tolerance<T>;
 
     auto& layout = this->layout;
     auto& field  = this->compField;
