@@ -42,16 +42,17 @@ const char* from_last_slash(const char* x){
 #include <ProgramOptions.hxx>
 #define FRAST3D_IMPLEMENTATION
 #include "rast3d.hpp"
-//#include <quadmath.h>
+#include <quadmath.h>
 #define gqf(X) __float128 X(__float128 x)noexcept{ \
     return X##q(x);\
 }
 namespace Kokkos{
 
-/*gqf(sqrt);
+gqf(sqrt);
 gqf(sin);
 gqf(floor);
 gqf(cos);
+__float128 abs(__float128 x)noexcept{ return fabsq(x);}
 gqf(exp);
 __float128 max(__float128 x, __float128 y)noexcept{ 
     return fmaxq(x, y);
@@ -60,9 +61,12 @@ __float128 min(__float128 x, __float128 y)noexcept{
     return fminq(x, y);
 }
 }
+namespace std{
+    template<>
+    struct is_scalar<__float128> : public true_type { };
+}
 std::ostream& operator<<(std::ostream& ostr, __float128 x){
     return ostr << (double)x;
-}*/
 }
 #include "Ippl.h"
 #include <Kokkos_MathematicalConstants.hpp>
@@ -595,7 +599,9 @@ int main(int argc, char* argv[]) {
         Inform msg(argv[0]);
         Inform msg2all(argv[0], INFORM_ALL_NODES);
         using scalar = double;
+
         scalar time_simulated;
+        double time_simulatedd;
         po::parser parser;
         std::vector<int> arg_extents;
         std::string dres_string;
@@ -605,7 +611,7 @@ int main(int argc, char* argv[]) {
         auto& resopt = parser["resolution"].abbreviation('r').description("Export frame resolution [int x int]").bind(dres_string);
         auto& partopt = parser["particles"].abbreviation('p').description("Number of particles (default 0) [int]").bind(n_particles);
         auto& vtkopt = parser["vtk"].description("Export a vtk every step [bool]");
-        auto& timeopt = parser["time"].abbreviation('t').description("Simulation duration (default 1.5) [scalar]").bind(time_simulated);
+        auto& timeopt = parser["time"].abbreviation('t').description("Simulation duration (default 1.5) [scalar]").bind(time_simulatedd);
         parser[""].description("Dimensions").description("Number of physical grid-cells in each dimension").bind(arg_extents);
         auto& help_option = parser["help"].abbreviation('h').description("Print this helpscreen");
         parser(argc, argv);
@@ -621,9 +627,9 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         if(!timeopt.was_set()){
-            time_simulated = 1.5;
+            time_simulatedd = 1.5;
         }
-        else if(time_simulated <= 0){
+        else if(time_simulatedd <= 0){
             std::cerr << "Time must be > 0\n";
             goto exit;
         }
@@ -634,7 +640,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "Number of must be >= 0\n";
             goto exit;
         }
-        
+        time_simulated = time_simulatedd;
         if(resopt.was_set()){
             size_t x = dres_string.find('x');
             if(x == std::string::npos || x == dres_string.size()){
@@ -830,7 +836,7 @@ int main(int argc, char* argv[]) {
             
             if(draw){
                 constexpr float rotate_speed = 7.0f;
-                Vector3<float> campos{(float)(-1.3 * std::cos(rotate_speed * (it * dt))), float(0.5), (float)(-1.3 * std::sin(rotate_speed * (it * dt)))};
+                Vector3<float> campos{(float)(-1.3 * Kokkos::cos(rotate_speed * (it * dt))), float(0.5), (float)(-1.3 * Kokkos::sin(rotate_speed * (it * dt)))};
                 //Vector3<float> campos{(float)(0), float(0), (float)(-80.0)};
                 Vector3<float> center{0.5f, 0.5f, 0.5f};
                 campos = center + campos;
@@ -920,7 +926,7 @@ int main(int argc, char* argv[]) {
         std::cout << "TIME: " << (end_time - start_time) / 1000 / 1000.0 << std::endl;
         std::sort(energies.begin(), energies.end());
         std::cout << energies.front() << " to " << energies.back() << "\n"; 
-        std::cout << "ERROR: " << std::abs(energies.back() - energies.front()) / (std::abs(energies.back()) + std::abs(energies.front())) << std::endl;
+        std::cout << "ERROR: " << Kokkos::abs(energies.back() - energies.front()) / (Kokkos::abs(energies.back()) + Kokkos::abs(energies.front())) << std::endl;
         //dumpVTK(solver.bunch, fieldB, nr[0], nr[1], nr[2], iterations + 1, hr[0], hr[1], hr[2]);
         if (!seed) {
             // add pulse at center of domain
