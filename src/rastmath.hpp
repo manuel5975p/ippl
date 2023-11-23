@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <cassert>
 #include <cmath>
-#ifndef KOKKOS_INLINE_FUNCTION
-#define KOKKOS_INLINE_FUNCTION
+#ifndef RM_INLINE
+#define RM_INLINE
 #endif
 namespace rm{
 template<typename T1, typename T2>
@@ -20,13 +20,13 @@ struct Vector{
     using scalar = T;
     T data[N];
 
-    #define OP4(X) KOKKOS_INLINE_FUNCTION constexpr Vector<T, N> operator X(const Vector<T, N>& o)const noexcept{\
+    #define OP4(X) RM_INLINE constexpr Vector<T, N> operator X(const Vector<T, N>& o)const noexcept{\
         Vector<T, N> ret;\
         for(unsigned i = 0;i < N;i++){\
             ret[i] = (*this)[i] X o[i];\
         }\
         return ret;}
-    #define OPA4(X) KOKKOS_INLINE_FUNCTION constexpr Vector<T, N>& operator X(const Vector<T, N>& o)noexcept{\
+    #define OPA4(X) RM_INLINE constexpr Vector<T, N>& operator X(const Vector<T, N>& o)noexcept{\
         for(unsigned i = 0;i < N;i++){\
             (*this)[i] X o[i];\
         }\
@@ -39,8 +39,8 @@ struct Vector{
     OPA4(-=)
     OPA4(*=)
     OPA4(/=)
-    KOKKOS_INLINE_FUNCTION constexpr T operator[](size_t i)const noexcept{ return data[i]; }
-    KOKKOS_INLINE_FUNCTION constexpr T& operator[](size_t i)noexcept{ return data[i]; }
+    RM_INLINE constexpr T operator[](size_t i)const noexcept{ return data[i]; }
+    RM_INLINE constexpr T& operator[](size_t i)noexcept{ return data[i]; }
     Vector<T, N> operator*(T x)const noexcept{
         Vector<T, N> ret;
         for(unsigned i = 0;i < N;i++){
@@ -71,23 +71,23 @@ struct Vector{
         return s << ")";
     }
     template<unsigned S>
-    KOKKOS_INLINE_FUNCTION Vector<T, S> head()const noexcept{
+    RM_INLINE Vector<T, S> head()const noexcept{
         Vector<T, S> ret;
         for(unsigned i = 0;i < S;i++)ret[i] = (*this)[i];
         return ret;
     }
     template<unsigned S>
-    KOKKOS_INLINE_FUNCTION Vector<T, S> tail()const noexcept{
+    RM_INLINE Vector<T, S> tail()const noexcept{
         Vector<T, S> ret;
         for(unsigned i = 0;i < S;i++)ret[i] = (*this)[N - S + i];
         return ret;
     }
-    KOKKOS_INLINE_FUNCTION constexpr T norm() const noexcept {
+    RM_INLINE constexpr T norm() const noexcept {
         using std::sqrt;
         return sqrt(squaredNorm());
     }
 
-    KOKKOS_INLINE_FUNCTION constexpr T squaredNorm() const noexcept {
+    RM_INLINE constexpr T squaredNorm() const noexcept {
         T sum = 0;
         for (unsigned i = 0; i < N; ++i) {
             sum += data[i] * data[i];
@@ -95,17 +95,17 @@ struct Vector{
         return sum;
     }
 
-    KOKKOS_INLINE_FUNCTION Vector<T, N>& normalize() noexcept {
+    RM_INLINE Vector<T, N>& normalize() noexcept {
         T in = T(1) / norm();
         *this = *this * in;
         return *this;
     }
 
-    KOKKOS_INLINE_FUNCTION Vector<T, N> normalized() const noexcept {
+    RM_INLINE Vector<T, N> normalized() const noexcept {
         T n = norm();
         return (*this) * (T(1.0) / n);
     }
-    KOKKOS_INLINE_FUNCTION Vector<T, N> cross(const Vector<T, N>& o) const noexcept {
+    RM_INLINE Vector<T, N> cross(const Vector<T, N>& o) const noexcept {
         static_assert(N == 3, "cross requires N == 3");
         return Vector<T, 3>{
             data[1] * o[2] - data[2] * o[1],
@@ -116,7 +116,7 @@ struct Vector{
 
     template <typename U = T>
     requires(N == 3)
-    KOKKOS_INLINE_FUNCTION Vector<U, 4> one_extend() const noexcept {
+    RM_INLINE Vector<U, 4> one_extend() const noexcept {
         Vector<U, 4> result;
         for (std::size_t i = 0; i < N; ++i) {
             result.data[i] = data[i];
@@ -126,7 +126,7 @@ struct Vector{
     }
     template <typename U = T>
     requires(N == 2)
-    KOKKOS_INLINE_FUNCTION Vector<U, 3> zero_extend() const noexcept {
+    RM_INLINE Vector<U, 3> zero_extend() const noexcept {
         Vector<U, 3> result;
         for (std::size_t i = 0; i < N; ++i) {
             result.data[i] = data[i];
@@ -135,11 +135,11 @@ struct Vector{
         return result;
     }
 
-    KOKKOS_INLINE_FUNCTION auto zerooneextend(){
+    RM_INLINE auto zerooneextend(){
         return this->zero_extend().one_extend();
     }
     template<typename O>
-    KOKKOS_INLINE_FUNCTION 
+    RM_INLINE 
     Vector<O, N> cast()const noexcept{
         Vector<O, N> ret;
         for (std::size_t i = 0; i < N; ++i) {
@@ -149,22 +149,22 @@ struct Vector{
     }
     template <typename U = T>
     requires(N >= 1)
-    KOKKOS_INLINE_FUNCTION T x() const noexcept {
+    RM_INLINE T x() const noexcept {
         return data[0];
     }
     template <typename U = T>
     requires(N >= 2)
-    KOKKOS_INLINE_FUNCTION T y() const noexcept {
+    RM_INLINE T y() const noexcept {
         return data[1];
     }
     template <typename U = T>
     requires(N >= 3)
-    KOKKOS_INLINE_FUNCTION T z() const noexcept {
+    RM_INLINE T z() const noexcept {
         return data[2];
     }
     template <typename U = T>
     requires(N >= 4)
-    KOKKOS_INLINE_FUNCTION T w() const noexcept {
+    RM_INLINE T w() const noexcept {
         return data[3];
     }
 };
@@ -225,7 +225,7 @@ struct Matrix{
         return result;
     }
     template<typename O>
-    KOKKOS_INLINE_FUNCTION
+    RM_INLINE
     Matrix<O, M, N> cast()const noexcept{
         Matrix<O, M, N> ret;
         for (std::size_t i = 0; i < N; ++i) {
