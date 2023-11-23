@@ -32,6 +32,7 @@ target_link_libraries (
     ${IPPL_LIBS}
     ${MPI_CXX_LIBRARIES}
     quadmath
+    EGL
 )
 
 if (ENABLE_FFT)

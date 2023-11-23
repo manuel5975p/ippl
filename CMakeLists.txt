@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-cmake_minimum_required (VERSION 3.11)
-=======
 cmake_minimum_required (VERSION 3.20.3)
->>>>>>> github/master
 project (IPPL CXX)
 include(FetchContent)
 set (IPPL_VERSION_MAJOR 3)

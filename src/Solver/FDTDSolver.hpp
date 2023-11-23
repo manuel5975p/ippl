@@ -583,7 +583,7 @@ namespace ippl {
         //bunch.layout_m->update();
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
         bunch_type bunch_buffer(pl);
-        pl.update(bunch, bunch_buffer);
+        pl.update(bunch);
         //Copy potential at N-1 and N+1 to phiNm1 and phiN for next time step
         Kokkos::deep_copy(ANm1_m.getView(), AN_m.getView());
         Kokkos::deep_copy(AN_m.getView(),   ANp1_m.getView());
@@ -674,7 +674,7 @@ namespace ippl {
         auto gbview = bunch.gamma_beta.getView();
         
         
-        bunch.Q = electron_charge * 5000.0;
+        bunch.Q = electron_charge * 100.0;
         bunch.mass = electron_mass;
         //bunch.R = ippl::Vector<scalar, 3>(0.4);
         //bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e1, 0.0};

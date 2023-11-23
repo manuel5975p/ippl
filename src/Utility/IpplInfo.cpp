@@ -25,7 +25,7 @@ void IpplInfo::printHelp(char**) {
     std::cout << "--------------------------------------------------------------------------------\n";
     std::cout << "-------------IPPL command line arguments----------------------------------------\n";
     std::cout << "--------------------------------------------------------------------------------\n";
-    std::cout << "This program is using Kokkos.  You can use the following command line flags to control its behavior\n";
+    std::cout << "This program is using IPPL.  You can use the following command line flags to control its behavior\n";
     std::cout << "IPPL Core Options:\n";
     std::cout << "   --info <n>                  : Set info message level.  0 = off.\n";
     std::cout << "   --overallocate|-b <factor>  : Set the buffer overallocation factor\n";

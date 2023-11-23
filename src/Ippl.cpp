@@ -19,7 +19,6 @@ namespace ippl {
         Info  = std::make_unique<Inform>("Ippl");
         Warn  = std::make_unique<Inform>("Warning", std::cerr);
         Error = std::make_unique<Inform>("Error", std::cerr, INFORM_ALL_NODES);
-        if(false)
         try {
             std::list<std::string> notparsed;
             int infoLevel = 0;

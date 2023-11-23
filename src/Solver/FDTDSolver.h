@@ -22,7 +22,6 @@
 #include "Types/Vector.h"
 #include <source_location>
 
-#include "Solver/BoundaryDispatch.h"
 #include "Field/Field.h"
 
 #include "FieldLayout/FieldLayout.h"

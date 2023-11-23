@@ -189,10 +189,6 @@ namespace ippl {
             },
             Kokkos::Sum<size_type>(invalidCount));
         Kokkos::fence();
-        if(invalidCount > pdata.getLocalNum()){
-            std::cout << invalidCount << ", " << pdata.getLocalNum() << "\n";
-        }
-        assert(invalidCount <= pdata.getLocalNum());
         return invalidCount;
     }
 
