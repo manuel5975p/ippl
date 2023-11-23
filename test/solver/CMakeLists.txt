@@ -34,6 +34,7 @@ target_link_libraries (
     quadmath
     EGL
 )
+target_include_directories(TestFDTDSolver PUBLIC "${pohxx_SOURCE_DIR}/include")
 
 if (ENABLE_FFT)
     add_executable (TestGaussian_convergence TestGaussian_convergence.cpp)
