@@ -140,7 +140,7 @@ Mesh GenMeshSphere(float radius, int rings, int slices){
     return mesh;
 }
 
-vaovbo to_vao(const Mesh& mesh, float* offsets) {
+vaovbo to_vao(const Mesh& mesh, float* offsets, size_t count) {
     // Assuming you have an OpenGL context and necessary bindings
 
     // Create and bind a Vertex Array Object (VAO)
@@ -176,7 +176,7 @@ vaovbo to_vao(const Mesh& mesh, float* offsets) {
     unsigned int offsetVBO;
     glGenBuffers(1, &offsetVBO);
     glBindBuffer(GL_ARRAY_BUFFER, offsetVBO);
-    glBufferData(GL_ARRAY_BUFFER, mesh.vertexCount * 3 * sizeof(float), offsets, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, count * 3 * sizeof(float), offsets, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(3);
     glVertexAttribDivisor(3, 1); // Set divisor for instancing

@@ -140,7 +140,8 @@ namespace ippl {
                 Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
 
                 // scatter
-                const value_type& val = dview_m(idx);
+                value_type val = dview_m(idx);
+                val *= (invdx[0] * invdx[1] * invdx[2]);
                 detail::scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, wlo, whi,
                                        args, val);
             });
@@ -238,6 +239,11 @@ namespace ippl {
                 Vector<PositionType, Field::dim> wlo = 1.0 - whi;
 
                 Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
+                dview_m(idx) = typename vector_type::value_type(0.0);
+                for(size_t i = 0;i < Field::dim;i++){
+                    if(args[i] >= (view.extent(i) - 1))return;
+                    if(args[i] < (size_t)nghost)return;
+                }
                 
                 // gather
                 dview_m(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},

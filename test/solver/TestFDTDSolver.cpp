@@ -44,6 +44,8 @@ const char* from_last_slash(const char* x){
 #define EGLU_IMPLEMENTATION
 #include <eglutils.hpp>
 
+#include <xoshiro.hpp>
+
 #include <ProgramOptions.hxx>
 
 #include <quadmath.h>
@@ -85,6 +87,7 @@ std::ostream& operator<<(std::ostream& ostr, __float128 x){
 
 #include "Particle/ParticleAttrib.h"
 #include "Solver/FDTDSolver.h"
+#include "PoissonSolvers/PoissonCG.h"
 uint64_t nanoTime(){
     using namespace std;
     using namespace chrono;
@@ -151,9 +154,16 @@ struct generate_random {
 
         value_type u;
         for (unsigned d = 0; d < Dim; ++d) {
+            typename T::value_type w = inside[d].max() - inside[d].min();
+            if(d != 5){
+                Rview (i)[d] = rand_gen.drand(w * 0.45, w * 0.55);
+                GBview(i)[d] = rand_gen.drand(-0.0, 0.0);
+            }
+            else{
+                Rview (i)[d] = rand_gen.drand(inside[d].min() + 0.2 * w, inside[d].max() - 0.2 * w);
+                GBview(i)[d] = rand_gen.drand(0.0, 0.0);
+            }
             
-            Rview(i)[d] = rand_gen.drand(inside[d].min(), inside[d].max());
-            GBview(i)[d] = rand_gen.drand(-5.0, 5.0);
             //GBview(i)[d] /= Kokkos::abs(GBview(i)[d]);
         }
 
@@ -612,16 +622,31 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
     uint64_t nghost = (uint64_t)f.getNghost();
     Kokkos::deep_copy(bhmirror, f.getView());
 
-    std::vector<float> vertices;
-    vertices.reserve(12 * (bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost));
+    //std::vector<float> vertices;
+    //vertices.reserve(12 * (bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost));
+    GLuint VBO;
+    glGenBuffers(1, &VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        (12 * (bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost)) * sizeof(float),
+        nullptr, GL_STATIC_DRAW
+    );
+    float* vbobuf = (float*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    float* vbobuf_cptr = vbobuf;
+    double ratio = 100000.0 / double((bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost));
+    std::bernoulli_distribution dis(std::min(ratio, 1.0));
+    
+    uint64_t emitted_line_vertices = 0;
+    xoshiro_256 gen(42);
     serial_for<Dim>([&](uint64_t i, uint64_t j, uint64_t k){
-        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.1));
+        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.001));
         i += lindex_lower[0] - nghost;
         j += lindex_lower[1] - nghost;
         k += lindex_lower[2] - nghost;
 
-        Color c = jet(bv.norm() * 50.0);
-        vertices.push_back((float)(i * spacing[0]));
+        Color c = jet(bv.norm() * 10.0);
+        /*vertices.push_back((float)(i * spacing[0]));
         vertices.push_back((float)(j * spacing[1]));
         vertices.push_back((float)(k * spacing[2]));
         vertices.push_back(c.x());
@@ -632,7 +657,23 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
         vertices.push_back((float)(k * spacing[2] + bv[2]));
         vertices.push_back(c.x());
         vertices.push_back(c.y());
-        vertices.push_back(c.z());
+        vertices.push_back(c.z());*/
+
+        if(dis(gen)){
+            *(vbobuf_cptr++) = ((float)(i * spacing[0]));
+            *(vbobuf_cptr++) = ((float)(j * spacing[1]));
+            *(vbobuf_cptr++) = ((float)(k * spacing[2]));
+            *(vbobuf_cptr++) = (c.x());
+            *(vbobuf_cptr++) = (c.y());
+            *(vbobuf_cptr++) = (c.z());
+            *(vbobuf_cptr++) = ((float)(i * spacing[0] + bv[0]));
+            *(vbobuf_cptr++) = ((float)(j * spacing[1] + bv[1]));
+            *(vbobuf_cptr++) = ((float)(k * spacing[2] + bv[2]));
+            *(vbobuf_cptr++) = (c.x());
+            *(vbobuf_cptr++) = (c.y());
+            *(vbobuf_cptr++) = (c.z());
+            emitted_line_vertices += 2;
+        }
         //std::cout << (float)(i * spacing[0] + bv[0]) << "\n";
 
         //rm::Vector<float, 3> origin{(float)(i * spacing[0]), (float)(j * spacing[1]), (float)(k * spacing[2])};
@@ -643,16 +684,18 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
     //     0.0f,  0.0f, 0.0f, 1.f, 0.f, 1.f,
     //     1.0f,  1.0f, 0.0f, 0.f, 1.f, 0.f
     //};
-    GLuint VAO, VBO;
+    glUnmapBuffer(GL_ARRAY_BUFFER);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    GLuint VAO;
 
     glLineWidth(3);
     glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
+    
 
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices[0]), vertices.data(), GL_STATIC_DRAW);
+    //glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices[0]), vertices.data(), GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
@@ -662,7 +705,7 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
     glBindVertexArray(VAO);
-    glDrawArrays(GL_LINES, 0, vertices.size() / 6);
+    glDrawArrays(GL_LINES, 0, emitted_line_vertices);
     glBindVertexArray(0);
 
     /*auto lindex_lower = lindex.first();
@@ -702,7 +745,7 @@ void draw_particle_bunch(const bunch_type& b,ippl::Vector<spsc, 3> spacing, Mesh
         lbuf.push_back(bv[1] + spacing[1] * 0.5);
         lbuf.push_back(bv[2] + spacing[2] * 0.5);
     }
-    vaovbo sphere_mesh_vaovbo = to_vao(to_use, lbuf.data());
+    vaovbo sphere_mesh_vaovbo = to_vao(to_use, lbuf.data(), b.getLocalNum());
     glBindVertexArray(sphere_mesh_vaovbo.vao);
     glDrawArraysInstanced(GL_TRIANGLES, 0, to_use.vertexCount,  b.getLocalNum());
     glBindVertexArray(0);
@@ -831,6 +874,7 @@ int main(int argc, char* argv[]) {
         scalar dt      = std::min({dx, dy, dz}) * timestepratio / c;
         unsigned int iterations = std::ceil((double)(time_simulated / dt));
         dt = time_simulated / (scalar)iterations;
+        LOG("WILL PERFORM " << iterations << " STEPS WITH DT = " << dt);
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
 
@@ -882,8 +926,8 @@ int main(int argc, char* argv[]) {
             );
         }
         auto bcsetter_single = [&vector_bcs, /*&scalar_bcs,*/ hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
-            vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::both_potential_t>>(Idx);
-            //vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
+            //vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::both_potential_t>>(Idx);
+            vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
             return 0;
         };
         auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
@@ -899,11 +943,11 @@ int main(int argc, char* argv[]) {
         //solver.phiN_m.setFieldBC(scalar_bcs);
         //solver.phiNp1_m.setFieldBC(scalar_bcs);
         //solver.phiNm1_m.setFieldBC(scalar_bcs);
-        solver.bunch.setParticleBC(ippl::PERIODIC);
+        solver.bunch.setParticleBC(ippl::NO);
         
-        solver.bconds[0] = ippl::PERIODIC_FACE;
-        solver.bconds[1] = ippl::PERIODIC_FACE;
-        solver.bconds[2] = ippl::PERIODIC_FACE;
+        solver.bconds[0] = ippl::MUR_ABC_1ST;
+        solver.bconds[1] = ippl::MUR_ABC_1ST;
+        solver.bconds[2] = ippl::MUR_ABC_1ST;
         //decltype(solver)::bunch_type bunch_buffer(solver.pl);
         //solver.pl.update(solver.bunch, bunch_buffer);
         if (!seed) {
@@ -917,7 +961,7 @@ int main(int argc, char* argv[]) {
             //if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
-                    ippl::Vector<scalar, 3> ret(0.0);
+                    ippl::Vector<scalar, 3> ret{0.0, x * 0.0f, 0.0};
                     //std::cout << x << " x\n";
                     //ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.1);
                     (void)x;
@@ -981,7 +1025,7 @@ void main() {
         glEnable(GL_DEPTH_TEST);
         std::vector<std::thread> lol;
         FILE* ffmpeg_file;
-        if(ippl::Comm->rank() == 0)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 60 -i - -c:v libx264 -preset slow -crf 23 -pix_fmt yuv420p autput.mp4", "w");
+        if(ippl::Comm->rank() == 0 && draw)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 60 -i - -c:v libx264 -preset slow -crf 21 -pix_fmt yuv420p autput.mp4", "w");
         for (unsigned int it = 1; it < iterations; ++it) {
             if(ippl::Comm->rank() == 0)
                 LOG("Timestep number: " << it);
@@ -1001,10 +1045,11 @@ void main() {
             energies.push_back(solver.total_energy);
             
             if(draw){
-                constexpr float rotate_speed = 4.0f;
+                float rotate_speed = (float)(1.0 / time_simulated);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 using vec3 = rm::camera::vec3;
-                vec3 camoff{(float)(-1.8 * Kokkos::cos(rotate_speed * (it * dt))), float(0.5), (float)(-1.8 * Kokkos::sin(rotate_speed * (it * dt)))};
+                //vec3 camoff{(float)(-1.6 * Kokkos::cos(rotate_speed * (it * dt))), float(-0.8), (float)(-1.6 * Kokkos::sin(rotate_speed * (it * dt)))};
+                vec3 camoff{(float)(0.0f), float(-0.8), -1.3f};
                 //Vector3<float> campos{(float)(0), float(0), (float)(-80.0)};
                 vec3 center{0.5f, 0.5f, 0.5f};
                 vec3 campos = center + camoff;

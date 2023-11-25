@@ -20,6 +20,7 @@ namespace ippl {
         using base_type = Field<T, Dim, Mesh, Centering, Props...>;
 
     public:
+        constexpr static unsigned dim = Dim;
         using Mesh_t      = Mesh;
         using Centering_t = Cell;
         using Layout_t    = FieldLayout<Dim>;

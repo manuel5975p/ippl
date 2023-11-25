@@ -39,6 +39,19 @@ namespace ippl {
             const std::index_sequence<Index...>&, const View& view,
             const Vector<T, View::rank>& wlo, const Vector<T, View::rank>& whi,
             const Vector<IndexType, View::rank>& args, const T& val) {
+            bool isinbound = true;
+            
+            ippl::Vector<IndexType, View::rank> index3{interpolationIndex<ScatterPoint, Index>(args)...};
+            for(unsigned int d = 0; d < View::rank;d++){
+                isinbound &= (index3[d] < view.extent(d));
+                isinbound &= (index3[d] >= 0);
+            }
+            if(!isinbound){
+                //if(ippl::Comm->rank() == 0){
+                //    std::cout << "scatter cancelled!!\n";
+                //}
+                return;
+            }
             Kokkos::atomic_add(&view(interpolationIndex<ScatterPoint, Index>(args)...),
                                val * (interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...));
         }
@@ -237,7 +250,6 @@ namespace ippl {
             }
 
             // Perform the scatter operation for each scatter point
-
             auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, fromi_local, jcfrom, scale)

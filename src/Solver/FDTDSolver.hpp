@@ -322,7 +322,7 @@ namespace ippl {
         scalar a2 = sqr(c * dt / hr_m[0]);  // a3 = a2
         scalar a4 = sqr(c * dt / hr_m[1]);  // a5 = a4
         scalar a6 = sqr(c * dt / hr_m[2]);  // a7 = a6
-        scalar a8 = sqr(c * dt);
+        scalar a8 = sqr(c * dt)/* / (hr_m[0] * hr_m[1] * hr_m[2])*/;
 
         // 1st order absorbing boundary conditions constants
         scalar beta0[3] = {(c * dt - hr_m[0]) / (c * dt + hr_m[0]),
@@ -425,6 +425,8 @@ namespace ippl {
                         isInterior * interior + !isInterior * view_aNp1(i, j, k)[gd];
                 });
         }*/
+        (*rhoN_mp) = 0.0;
+        bunch.Q.scatter(*rhoN_mp, bunch.R);
         AN_m.getFieldBC().apply(AN_m);
         Kokkos::parallel_for(
             "4-Vector potential update", ippl::getRangePolicy(view_AN, nghost_A),
@@ -511,18 +513,21 @@ namespace ippl {
                         int offs = bocc[gd] == AT_MIN ? 1 : -1;
                         if(gd == 0){
                             //view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i + offs, j, k) - view_AN(i, j, k)) * this->dt / hr_m[0];
+                            view_ANp1(i, j, k) = abc_x[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
                             //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
                             //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
                             //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 1){
                             //view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j + offs, k) - view_AN(i, j, k)) * this->dt / hr_m[1];
+                            view_ANp1(i, j, k) = abc_y[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
                             //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
                             //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
                             //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 2){
                             //view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j, k + offs) - view_AN(i, j, k)) * this->dt / hr_m[2];
+                            view_ANp1(i, j, k) = abc_z[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
                             //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
                             //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
                             //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
@@ -540,6 +545,7 @@ namespace ippl {
 
         Kokkos::View<bool*> invalid("OOB Particcel", bunch.getLocalNum());
         size_t invalid_count = 0;
+        
         Kokkos::parallel_reduce(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(size_t i, size_t& ref){
             bool out_of_bounds = false;
             ippl::Vector<scalar, Dim> ppos = rview(i);
@@ -550,7 +556,7 @@ namespace ippl {
             invalid(i) = out_of_bounds;
             ref += out_of_bounds;
         }, invalid_count);
-        bunch.destroy(invalid, invalid_count);
+        //bunch.destroy(invalid, invalid_count);
         bunch.E_gather.gather(*this->En_mp, bunch.R);
         bunch.B_gather.gather(*this->Bn_mp, bunch.R);
         
@@ -559,15 +565,18 @@ namespace ippl {
         constexpr scalar e_mass = 0.5110;
         scalar this_dt = this->dt;
         int ronk = ippl::Comm->rank();
+        //LOG("Particcel count: " << bunch.getLocalNum());
         Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
             scalar charge = Qview(i);
             //using ::sqrt;
             const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
-            
-            
+            //LOG(gammabeta_view(i));
+            //LOG(B_gatherview(i));
             const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
             const scalar alpha = -charge * this_dt / (scalar(2) * e_mass * sqrt(1 + dot_prod(t1, t1)));
+            ippl::Vector<scalar, 3> crossprod = alpha * ippl::cross(t1, B_gatherview(i));
+            LOG("Cross: " << crossprod);
             const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
             const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
             const ippl::Vector<scalar, 3> ngammabeta = t3 - charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
@@ -575,10 +584,12 @@ namespace ippl {
                 ippl::Vector<scalar, 3> adder = this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));
                 //LOG(adder);
             }
-            rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));            
+            rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));
+            gammabeta_view(i) = ngammabeta;
         });
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
-        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, scalar(1.0) / dt);
+        
+        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, scalar(1.0) / (dt * hr_m[0] * hr_m[1]));
         
         //bunch.layout_m->update();
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
@@ -614,6 +625,7 @@ namespace ippl {
             ippl::Vector<scalar, Dim * 2> gcp1_eval = gcp1_expression(i,j,k);
             eview(i, j, k) = -gc_eval.template head<3>();
             bview(i, j, k) =  (gc_eval.template tail<3>() + gcp1_eval.template tail<3>()) * 0.5;
+            //LOG("megnet" << bview(i,j,k));
             eview(i, j, k) -= (AP1view(i,j,k).template tail<3>() - Aview(i,j,k).template tail<3>()) * idt;
         });
 
@@ -625,7 +637,28 @@ namespace ippl {
         //auto edview = energy_density.getView();
         
         scalar eb_energy = 0.0;
-        
+        scalar radiation_on_boundary = 0.0;
+        ippl::Vector<size_t, 3> extenz = ippl::Vector<size_t, 3>{(size_t)nr_m[0] + 2, (size_t)nr_m[1] + 2, (size_t)nr_m[2] + 2};
+        if(radiation)
+            Kokkos::parallel_reduce(ippl::getRangePolicy(eview, 1), KOKKOS_LAMBDA(int i, int j, int k, scalar& ref){
+                //edview(i,j,k) = aview(i,j,k)[2];
+                //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
+                ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(2, ippl::Vector<size_t, 3>{(size_t)i, (size_t)j, (size_t)k}, extenz);
+                ippl::Vector<double, 3> outward_normal = 0.0;
+                for(int dd = 0;dd < 3;dd++){
+                    if(bocc[dd] == AT_MAX){
+                        outward_normal[dd] = 1.0;
+                    }
+                    else if(bocc[dd] == AT_MIN){
+                        outward_normal[dd] = -1.0;
+                    }
+                }
+                ref += dot_prod(radiation->getView()(i,j,k), outward_normal);
+            }, radiation_on_boundary);
+        Kokkos::fence();
+        radiation_on_boundary *= hr_m[0] * hr_m[0];
+        this->absorbed__energy += radiation_on_boundary;
+        LOG("Radiation: " << this->absorbed__energy);
         Kokkos::parallel_reduce(ippl::getRangePolicy(eview, 1), KOKKOS_LAMBDA(int i, int j, int k, scalar& ref){
             //edview(i,j,k) = aview(i,j,k)[2];
             //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
@@ -674,7 +707,7 @@ namespace ippl {
         auto gbview = bunch.gamma_beta.getView();
         
         
-        bunch.Q = electron_charge * 100.0;
+        bunch.Q = electron_charge * 1.0;
         bunch.mass = electron_mass;
         //bunch.R = ippl::Vector<scalar, 3>(0.4);
         //bunch.gamma_beta = ippl::Vector<scalar, 3>{0.0, 1e1, 0.0};
@@ -714,6 +747,7 @@ namespace ippl {
         ANm1_m = 0.0;
         AN_m   = 0.0;
         ANp1_m = 0.0;
+        absorbed__energy = 0;
     };
     template<typename Tfields, unsigned Dim, class M, class C>
     template<typename callable>
@@ -735,7 +769,7 @@ namespace ippl {
         //std::cout << "Rank " << ippl::Comm->rank() << " has y offset " << ldom[1].first() << "\n";
         int nghost = AN_m.getNghost();
         Kokkos::parallel_for(
-            "Assign sinusoidal source at center", ippl::getRangePolicy(view_A, nghost), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
+            "Assign sinusoidal source at center", ippl::getRangePolicy(view_A, 0), KOKKOS_CLASS_LAMBDA(const int i, const int j, const int k){
                 const int ig = i + ldom[0].first() - nghost;
                 const int jg = j + ldom[1].first() - nghost;
                 const int kg = k + ldom[2].first() - nghost;
