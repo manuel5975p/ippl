@@ -155,13 +155,13 @@ struct generate_random {
         value_type u;
         for (unsigned d = 0; d < Dim; ++d) {
             typename T::value_type w = inside[d].max() - inside[d].min();
-            if(d != 5){
+            if(d != 1){
                 Rview (i)[d] = rand_gen.drand(w * 0.45, w * 0.55);
-                GBview(i)[d] = rand_gen.drand(-0.0, 0.0);
+                GBview(i)[d] = rand_gen.drand(0.0, 0.0);
             }
             else{
                 Rview (i)[d] = rand_gen.drand(inside[d].min() + 0.2 * w, inside[d].max() - 0.2 * w);
-                GBview(i)[d] = rand_gen.drand(0.0, 0.0);
+                GBview(i)[d] = rand_gen.drand(5.0, 5.0);
             }
             
             //GBview(i)[d] /= Kokkos::abs(GBview(i)[d]);
@@ -640,7 +640,7 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
     uint64_t emitted_line_vertices = 0;
     xoshiro_256 gen(42);
     serial_for<Dim>([&](uint64_t i, uint64_t j, uint64_t k){
-        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.001));
+        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.000001));
         i += lindex_lower[0] - nghost;
         j += lindex_lower[1] - nghost;
         k += lindex_lower[2] - nghost;
@@ -884,12 +884,17 @@ int main(int argc, char* argv[]) {
         // define the R (rho) field
         Field_t rho;
         rho.initialize(mesh, layout);
+        Field_t urho;
+        urho.initialize(mesh, layout);
+        Field_t phi_ic;
+        phi_ic.initialize(mesh, layout);
         // define the Vector field E (LHS)
         VField_t fieldE, fieldB;
         fieldE.initialize(mesh, layout);
         fieldB.initialize(mesh, layout);
         fieldE = 0.0;
         fieldB = 0.0;
+        rho = 0.0;
         
         // define current = 0
         VField_t current;
@@ -905,9 +910,10 @@ int main(int argc, char* argv[]) {
         // define an FDTDSolver object
         ippl::FDTDSolver<scalar, Dim> solver(&rho, &current, &fieldE, &fieldB, dt, n_particles, &radiation,seed);
         
+        
         using s_t = ippl::FDTDSolver<scalar, Dim>;
         s_t::both_potential_t::BConds_t vector_bcs;
-        //s_t::Field_t::BConds_t  scalar_bcs;
+        s_t::Field_t::BConds_t ic_scalar_bcs;
 
         typename s_t::playout_type::RegionLayout_t const& rlayout = solver.pl.getRegionLayout();
         typename s_t::playout_type::RegionLayout_t::view_type::host_mirror_type regions_view = rlayout.gethLocalRegions();
@@ -925,8 +931,8 @@ int main(int argc, char* argv[]) {
                 )
             );
         }
-        auto bcsetter_single = [&vector_bcs, /*&scalar_bcs,*/ hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
-            //vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::both_potential_t>>(Idx);
+        auto bcsetter_single = [&vector_bcs, &ic_scalar_bcs, hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
+            ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
             vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
             return 0;
         };
@@ -936,10 +942,12 @@ int main(int argc, char* argv[]) {
         };
         
         bcsetter(std::make_index_sequence<Dim * 2>{});
-
+        
         solver.AN_m  .setFieldBC(vector_bcs);
         solver.ANp1_m.setFieldBC(vector_bcs);
         solver.ANm1_m.setFieldBC(vector_bcs);
+        phi_ic.setFieldBC(ic_scalar_bcs);
+        rho.setFieldBC(ic_scalar_bcs);
         //solver.phiN_m.setFieldBC(scalar_bcs);
         //solver.phiNp1_m.setFieldBC(scalar_bcs);
         //solver.phiNm1_m.setFieldBC(scalar_bcs);
@@ -948,20 +956,60 @@ int main(int argc, char* argv[]) {
         solver.bconds[0] = ippl::MUR_ABC_1ST;
         solver.bconds[1] = ippl::MUR_ABC_1ST;
         solver.bconds[2] = ippl::MUR_ABC_1ST;
-        //decltype(solver)::bunch_type bunch_buffer(solver.pl);
-        //solver.pl.update(solver.bunch, bunch_buffer);
-        if (!seed) {
+        
+        decltype(solver)::bunch_type bunch_buffer(solver.pl);
+        solver.pl.update(solver.bunch/*, bunch_buffer*/);
+        
+        solver.bunch.Q.scatter(rho, solver.bunch.R);
+        //{
+        //    auto view_rho    = rho.getView();
+        //    Kokkos::parallel_for(ippl::getRangePolicy(view_rho, 28), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+        //        std::cout << view_rho(i,j,k) << " ";
+        //    });
+        //}
+        //std::cout << "\n\n\n";
+        ippl::ParameterList list;
+        list.add("use_heffte_defaults", true);
+        urho = rho.deepCopy();
+        list.add("output_type", ippl::PoissonCG<VField_t, Field_t>::SOL);
+        ippl::PoissonCG<Field_t, Field_t> initial_phi_solver(phi_ic, rho);
 
+        initial_phi_solver.mergeParameters(list);
+        //initial_phi_solver.initialize();
+        //LOG("RHOSUM: " << rho.sum());
+        //initial_phi_solver.updateParameter("output_type", 3);
+        //initial_phi_solver.setGradient(fieldE);
+        initial_phi_solver.solve();
+        //LOG("RHOSUM: " << rho.sum());
+        rho = ippl::laplace(phi_ic);
+        //LOG("RHOSUM: " << phi_ic.sum());
+        
+        if (!seed) {
+            auto view_phiic = phi_ic.getView();
             // add pulse at center of domain
             auto view_rho    = rho.getView();
+            auto view_urho    = urho.getView();
+            Kokkos::parallel_for(ippl::getRangePolicy(view_rho, 28), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+                //if((i | j | k) < 6){
+                //    std::cout << "Laplace of Solution = " << rho(i,j,k) << ", ";
+                //    std::cout << "RHS = " << view_urho(i,j,k) << ", ";
+                //    std::cout << rho(i,j,k) - view_urho(i,j,k) << "\n";
+                //}
+            });
+            //Kokkos::parallel_for(ippl::getRangePolicy(view_rho, 28), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+            //    std::cout << view_phiic(i,j,k) << " ";
+            //});
+            std::cout << "\n\n\n";
+
+
             //const int nghost = rho.getNghost();
             //auto ldom        = layout.getLocalNDIndex();
             auto view_A      = solver.AN_m.getView();
             auto view_An1    = solver.ANm1_m.getView();
             //if(false)
             solver.fill_initialcondition(
-                KOKKOS_LAMBDA(scalar x, scalar y, scalar z) {
-                    ippl::Vector<scalar, 3> ret{0.0, x * 0.0f, 0.0};
+                KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z) {
+                    ippl::Vector<scalar, 4> ret{-view_phiic(i, j, k), 0.0, x * 200.0f, 0.0};
                     //std::cout << x << " x\n";
                     //ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.1);
                     (void)x;
@@ -970,7 +1018,7 @@ int main(int argc, char* argv[]) {
                     return ret;
             });
         }
-        
+        //goto exit;
         msg << "Timestep number = " << 0 << " , time = " << 0 << endl;
         //solver.aN_m.setFieldBC()
         //dumpVTK(solver.bunch, radiation, nr[0], nr[1], nr[2], 0, hr[0], hr[1], hr[2]);
@@ -1025,7 +1073,7 @@ void main() {
         glEnable(GL_DEPTH_TEST);
         std::vector<std::thread> lol;
         FILE* ffmpeg_file;
-        if(ippl::Comm->rank() == 0 && draw)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 60 -i - -c:v libx264 -preset slow -crf 21 -pix_fmt yuv420p autput.mp4", "w");
+        if(ippl::Comm->rank() == 0 && draw)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 60 -i - -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p autput.mp4", "w");
         for (unsigned int it = 1; it < iterations; ++it) {
             if(ippl::Comm->rank() == 0)
                 LOG("Timestep number: " << it);
@@ -1094,7 +1142,7 @@ void main() {
                 {
                     glUseProgram(shad.shaderProgram);
                     draw_domain_wireframe(solver.layout_mp->getLocalNDIndex(),fieldB.get_mesh().getMeshSpacing(), lc, lt);
-                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), fieldB, lc, lt);
+                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), radiation, lc, lt);
                     glUseProgram(ishad.shaderProgram);
                     draw_particle_bunch(solver.bunch, fieldB.get_mesh().getMeshSpacing(), sphere_mesh);
                     std::vector<unsigned char> pixels(3 * drawing_resolution.x() * drawing_resolution.y(), 0);  // Assuming RGB

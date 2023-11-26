@@ -60,8 +60,8 @@ namespace ippl {
 
         void solve() override;
 
-    private:
         void initialize();
+    private:
 
         std::shared_ptr<FFT_t> fft_mp;
         CxField_t fieldComplex_m;

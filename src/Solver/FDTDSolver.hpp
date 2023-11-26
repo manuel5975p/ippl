@@ -568,7 +568,7 @@ namespace ippl {
         //LOG("Particcel count: " << bunch.getLocalNum());
         Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
-            scalar charge = Qview(i);
+            scalar charge = -Qview(i);
             //using ::sqrt;
             const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
             //LOG(gammabeta_view(i));
@@ -576,7 +576,6 @@ namespace ippl {
             const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
             const scalar alpha = -charge * this_dt / (scalar(2) * e_mass * sqrt(1 + dot_prod(t1, t1)));
             ippl::Vector<scalar, 3> crossprod = alpha * ippl::cross(t1, B_gatherview(i));
-            LOG("Cross: " << crossprod);
             const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
             const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
             const ippl::Vector<scalar, 3> ngammabeta = t3 - charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
@@ -589,6 +588,8 @@ namespace ippl {
         });
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
         
+
+                                                                    //What is the scaling factor here?
         bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, scalar(1.0) / (dt * hr_m[0] * hr_m[1]));
         
         //bunch.layout_m->update();
@@ -658,7 +659,6 @@ namespace ippl {
         Kokkos::fence();
         radiation_on_boundary *= hr_m[0] * hr_m[0];
         this->absorbed__energy += radiation_on_boundary;
-        LOG("Radiation: " << this->absorbed__energy);
         Kokkos::parallel_reduce(ippl::getRangePolicy(eview, 1), KOKKOS_LAMBDA(int i, int j, int k, scalar& ref){
             //edview(i,j,k) = aview(i,j,k)[2];
             //std::cout << "E: " << squaredNorm(eview(i,j,k)) << " | B: " << squaredNorm(bview(i,j,k)) << "\n";
@@ -700,7 +700,7 @@ namespace ippl {
         constexpr scalar c        = 1.0;  // 299792458.0;
         constexpr scalar mu0      = 1.0;  // 1.25663706212e-6;
         constexpr scalar epsilon0 = 1.0 / (c * c * mu0);
-        constexpr scalar electron_charge = 0.30282212088;
+        constexpr scalar electron_charge = -0.30282212088;
         constexpr scalar electron_mass = 0.5110;
         bunch.create(particle_count / ippl::Comm->size());
         auto Rview = bunch.R.getView();
@@ -783,9 +783,9 @@ namespace ippl {
                 //view_phin1(i,j,k) = 0.0;
                 //view_a  (i, j, k) = c(x, y, z);
                 //view_an1(i, j, k) = c(x, y, z);
-                for(int l = 0;l < 3;l++){
-                    view_A  (i, j, k)[l + 1] = c(x, y, z)[l];
-                    view_An1(i, j, k)[l + 1] = c(x, y, z)[l];
+                for(int l = 0;l < 4;l++){
+                    view_A  (i, j, k)[l] = c(i, j, k, x, y, z)[l];
+                    view_An1(i, j, k)[l] = c(i, j, k, x, y, z)[l];
                     
                 }
             }
