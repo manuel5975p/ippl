@@ -28,6 +28,41 @@
 #include "Meshes/UniformCartesian.h"
 
 template <typename _scalar, class PLayout>
+struct TracerBunch : public ippl::ParticleBase<PLayout> {
+    using scalar = _scalar;
+
+    // Constructor for the Bunch class, taking a PLayout reference
+    TracerBunch(PLayout& playout)
+        : ippl::ParticleBase<PLayout>(playout) {
+        // Add attributes to the particle bunch
+        //this->addAttribute(Q);          // Charge attribute
+        //this->addAttribute(mass);       // Mass attribute
+        //this->addAttribute(gamma_beta); // Gamma-beta attribute (product of relativistiv gamma and beta)
+        //this->addAttribute(R_np1);      // Position attribute for the next time step
+        this->addAttribute(E_gather);   // Electric field attribute for particle gathering
+        this->addAttribute(B_gather);   // Magnetic field attribute for particle gathering
+        this->addAttribute(outward_normal);   // Magnetic field attribute for particle gathering
+    }
+
+    // Destructor for the Bunch class
+    ~TracerBunch() {}
+
+    // Define container types for various attributes
+    //using charge_container_type   = ippl::ParticleAttrib<scalar>;
+    //using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
+    using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
+
+    // Declare instances of the attribute containers
+    //charge_container_type Q;          // Charge container
+    //charge_container_type mass;       // Mass container
+    //velocity_container_type gamma_beta; // Gamma-beta container
+    //typename ippl::ParticleBase<PLayout>::particle_position_type R_np1; // Position container for the next time step
+    vector_container_type E_gather;      // Electric field container for particle gathering
+    vector_container_type B_gather;      // Magnetic field container for particle gathering
+    vector_container_type outward_normal;// Outward normals for particle gathering
+};
+
+template <typename _scalar, class PLayout>
 struct Bunch : public ippl::ParticleBase<PLayout> {
     using scalar = _scalar;
 
@@ -41,6 +76,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
         this->addAttribute(R_np1);      // Position attribute for the next time step
         this->addAttribute(E_gather);   // Electric field attribute for particle gathering
         this->addAttribute(B_gather);   // Magnetic field attribute for particle gathering
+        this->addAttribute(A_gather);   // Magnetic field attribute for particle gathering
     }
 
     // Destructor for the Bunch class
@@ -50,6 +86,7 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     using charge_container_type   = ippl::ParticleAttrib<scalar>;
     using velocity_container_type = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
     using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
+    using vector4_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 4>>;
 
     // Declare instances of the attribute containers
     charge_container_type Q;          // Charge container
@@ -58,6 +95,9 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     typename ippl::ParticleBase<PLayout>::particle_position_type R_np1; // Position container for the next time step
     vector_container_type E_gather;   // Electric field container for particle gathering
     vector_container_type B_gather;   // Magnetic field container for particle gathering
+
+
+    vector4_container_type A_gather;   // Magnetic field container for particle gathering debug
 };
 
 template<typename _scalar, class PLayout>
@@ -181,6 +221,9 @@ namespace ippl {
         playout_type pl;
         ::Bunch<scalar, ippl::ParticleSpatialLayout<scalar, 3>> bunch;
         size_t particle_count;
+
+        ::TracerBunch<scalar, ippl::ParticleSpatialLayout<scalar, 3>> tracer_bunch;
+        size_t tracer_count;
 
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;

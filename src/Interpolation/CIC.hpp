@@ -73,6 +73,7 @@ namespace ippl {
             const std::index_sequence<Index...>&, const View& view,
             const Vector<T, View::rank>& wlo, const Vector<T, View::rank>& whi,
             const Vector<IndexType, View::rank>& args) {
+                //LOG("    GD: " << (interpolationWeight<GatherPoint, Index>(wlo, whi) * ...) << " * " << view(interpolationIndex<GatherPoint, Index>(args)...) << "\n");
             return (interpolationWeight<GatherPoint, Index>(wlo, whi) * ...)
                    * view(interpolationIndex<GatherPoint, Index>(args)...);
         }
@@ -91,7 +92,7 @@ namespace ippl {
         KOKKOS_INLINE_FUNCTION constexpr IndexType zigzag_interpolationIndex(
             const Vector<IndexType, Dim>& args) {
             if constexpr (Point & (1 << Index)) {
-                return args[Index] + 1;
+                return args[Index] - 1;
             } else {
                 return args[Index];
             }
@@ -134,7 +135,7 @@ namespace ippl {
             //std::cout << args[0] << " " << args[1] << " " << args[2] << std::endl;
             //assert(((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...));
             bool isinbound = true;
-            
+            ippl::Vector<T, Dim> depot = scale * val * (zigzag_interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...);
             ippl::Vector<IndexType, Dim> index3{zigzag_interpolationIndex<ScatterPoint, Index>(args)...};
             for(unsigned int d = 0; d < Dim;d++){
                 isinbound &= (index3[d] < view.extent(d));
@@ -145,6 +146,7 @@ namespace ippl {
                 //}
                 return 0;
             }
+            //LOG("First_depot: " << depot);
             typename ippl::detail::ViewType<ippl::Vector<T, Dim>,
                                             Dim>::view_type::value_type::value_type* destptr =
                 &(view(zigzag_interpolationIndex<ScatterPoint, Index>(args)...)[0]);
@@ -210,7 +212,7 @@ namespace ippl {
                 fromi[i] = floor(from_in_grid_coordinates[i]) + nghost;
                 toi[i]   = floor(to_in_grid_coordinates[i])   + nghost;
             }
-            
+            LOG("fromi and toi: " << fromi << toi);
             ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
             ippl::Vector<IndexType, Dim> toi_local = toi - lDom.first();
             /*if(ippl::Comm->rank() == 0){
@@ -224,22 +226,31 @@ namespace ippl {
             for (unsigned int i = 0; i < Dim; i++) {
                 relay[i] =
                 min(
-                    min(fromi[i], toi[i]) * hr[i] + hr[i],
+                    min(fromi[i] - nghost, toi[i] - nghost) * hr[i] + hr[i],
                     max(
-                        max(fromi[i], toi[i]) * hr[i],
+                        max(fromi[i] - nghost, toi[i] - nghost) * hr[i],
                         T(0.5) * (to[i] + from[i])
                     )
                 );
             }
-            ippl::Vector<T, Dim> relay_local = relay - lDom.first();
-
+            //ippl::Vector<T, Dim> relay_local = relay - lDom.first();
+            
             // Calculate jcfrom and jcto
             ippl::Vector<T, Dim> jcfrom, jcto;
             jcfrom = relay;
             jcfrom -= from;
+            //LOG("JCFROM: " << jcfrom);
             jcto = to;
             jcto -= relay;
-            
+            for(int i = 0;i < 3;i++){
+                if(std::signbit(jcfrom[i]) != std::signbit(jcto[i])){
+                    std::cerr << "Violation\n" << from << relay << to << "\n";
+                    abort();
+                }
+            }
+            //LOG("JCTO: " << jcfrom);
+            LOG("From to Relay: " << from << to << relay);
+            //LOG("Scale: " << scale);
             //std::cout << ippl::Comm->rank() << jcfrom << "   \t" << jcto << "\n";
             //std::cout << lDom.first() << "  ldf\n";
             // Calculate wlo and whi
@@ -248,16 +259,20 @@ namespace ippl {
                 wlo[i] = T(1.0) - fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
                 whi[i] = fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
             }
-
+            LOG("Current weights: " << whi);
             // Perform the scatter operation for each scatter point
             auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, fromi_local, jcfrom, scale)
                  ^ ...);
+            
             for (unsigned i = 0; i < Dim; i++) {
                 wlo[i] = T(1.0) - fractional_part((to[i] + relay[i]) * T(0.5) / hr[i]);
                 whi[i] = fractional_part((to[i] + relay[i]) * T(0.5) / hr[i]);
             }
+
+            LOG("Current weights: " << whi);
+            
             auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
                                                      whi, toi_local, jcto, scale)

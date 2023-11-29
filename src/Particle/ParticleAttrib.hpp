@@ -142,6 +142,7 @@ namespace ippl {
                 // scatter
                 value_type val = dview_m(idx);
                 val *= (invdx[0] * invdx[1] * invdx[2]);
+                LOG("Charge weights: " << whi);
                 detail::scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, wlo, whi,
                                        args, val);
             });
@@ -189,6 +190,7 @@ namespace ippl {
 
                 //val is charge (or other quantity)
                 const value_type& val = dview_m(idx);
+                //LOG("Passing from " << from << " to " << to << "!!");
                 detail::zigzag_scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, from, to, dx, val * dt_scale, lDom, nghost);
             });
         IpplTimings::stopTimer(scatterTimer);
@@ -244,7 +246,7 @@ namespace ippl {
                     if(args[i] >= (view.extent(i) - 1))return;
                     if(args[i] < (size_t)nghost)return;
                 }
-                
+                LOG("Gatherpos: " << args);
                 // gather
                 dview_m(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},
                                                        view, wlo, whi, args);

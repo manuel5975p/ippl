@@ -55,6 +55,24 @@ struct shader {
         glDeleteShader(vertexShader);
         glDeleteShader(fragmentShader);
     }
+    void setfloat(const char* name, float value) const {
+        //float vals [3];
+        //for(int j = 0;j < j;j++){
+        //    vals[j] = col[j];
+        //}
+        glUseProgram(shaderProgram);
+        GLuint uniformLocation = glGetUniformLocation(shaderProgram, name);
+        glUniform1f(uniformLocation, value);
+    }
+    void setvec3(const char* name, const rm::Vector<float, 3>& col) const {
+        //float vals [3];
+        //for(int j = 0;j < j;j++){
+        //    vals[j] = col[j];
+        //}
+        glUseProgram(shaderProgram);
+        GLuint uniformLocation = glGetUniformLocation(shaderProgram, name);
+        glUniform3f(uniformLocation, col.x(), col.y(), col.z());
+    }
     void setMat4(const char* name, const rm::Matrix<float, 4, 4>& matrix) const {
         float vals [16];
         for(int i = 0;i < 4;i++){
@@ -195,7 +213,7 @@ void load_context(EGLint width, EGLint height){
         EGL_NONE,
     };
     EGLDisplay eglDpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    EGLint major, minor;
+    EGLint major = -1, minor = -1;
     eglInitialize(eglDpy, &major, &minor);
     // 2. Select an appropriate configuration
     EGLint numConfigs;
@@ -208,7 +226,9 @@ void load_context(EGLint width, EGLint height){
     eglBindAPI(EGL_OPENGL_API);
     EGLContext eglCtx = eglCreateContext(eglDpy, eglCfg, EGL_NO_CONTEXT, 0);
     eglMakeCurrent(eglDpy, eglSurf, eglSurf, eglCtx);
-    gladLoadGL(eglGetProcAddress);
+    std::cout << "EGL context obtained with version " << major << "." << minor << std::endl;
+    int loadret = gladLoadGL(eglGetProcAddress);
+    std::cout << "OpenGL version supported by this platform: " << glGetString(GL_VERSION) << std::endl;
 }
 #endif
 
