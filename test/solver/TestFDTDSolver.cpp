@@ -686,7 +686,7 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
     uint64_t emitted_line_vertices = 0;
     xoshiro_256 gen(42);
     serial_for<Dim>([&](uint64_t i, uint64_t j, uint64_t k){
-        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.0001));
+        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.00001));
         i += lindex_lower[0] - nghost;
         j += lindex_lower[1] - nghost;
         k += lindex_lower[2] - nghost;
@@ -966,15 +966,22 @@ int main(int argc, char* argv[]) {
         
         Kokkos::Random_XorShift64_Pool<> rand_pool((size_t)(42312 + 100 * ippl::Comm->rank()));
         {
+            const size_t count = solver.bunch.getLocalNum();
+            auto srview = solver.bunch.R.getView();
+            auto gbrview = solver.bunch.gamma_beta.getView();
             int rink = ippl::Comm->rank();
             Kokkos::parallel_for(
                 Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
-                generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-                    solver.bunch.R.getView(),
-                    solver.bunch.gamma_beta.getView(),
-                    regions_view(rink),
-                    rand_pool
-                )
+                //generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                //    solver.bunch.R.getView(),
+                //    solver.bunch.gamma_beta.getView(),
+                //    regions_view(rink),
+                //    rand_pool
+                //)
+                KOKKOS_LAMBDA(size_t idx){
+                    srview(idx) = ippl::Vector<scalar, Dim>{0.0, scalar(idx) / count, 0.0};
+                    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
+                }
             );
         }
         LOG("Initial bunch energy: " << bunch_energy(solver.bunch));
@@ -998,7 +1005,7 @@ int main(int argc, char* argv[]) {
         //solver.phiN_m.setFieldBC(scalar_bcs);
         //solver.phiNp1_m.setFieldBC(scalar_bcs);
         //solver.phiNm1_m.setFieldBC(scalar_bcs);
-        solver.bunch.setParticleBC(ippl::NO);
+        solver.bunch.setParticleBC(ippl::PERIODIC);
         
         solver.bconds[0] = ippl::MUR_ABC_1ST;
         solver.bconds[1] = ippl::MUR_ABC_1ST;
@@ -1056,7 +1063,7 @@ int main(int argc, char* argv[]) {
             //if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z) {
-                    ippl::Vector<scalar, 4> ret{-view_phiic(i, j, k), 0.0, x * 0.0f, 0.0};
+                    ippl::Vector<scalar, 4> ret{-view_phiic(i, j, k), 0.0, x * 70.0f, 0.0};
                     //std::cout << x << " x\n";
                     //ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.1);
                     (void)x;
@@ -1196,7 +1203,7 @@ void main() {
                 {
                     glUseProgram(shad.shaderProgram);
                     draw_domain_wireframe(solver.layout_mp->getLocalNDIndex(),fieldB.get_mesh().getMeshSpacing(), lc, lt);
-                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), *solver.JN_mp, lc, lt);
+                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), radiation, lc, lt);
                     glUseProgram(ishad.shaderProgram);
                     ishad.setvec3("ucol", rm::Vector<float, 3>{0.0f,1.0f,0.0f});
                     ishad.setfloat("scale", 1.0f);

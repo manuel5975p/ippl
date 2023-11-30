@@ -246,7 +246,7 @@ namespace ippl {
                     if(args[i] >= (view.extent(i) - 1))return;
                     if(args[i] < (size_t)nghost)return;
                 }
-                LOG("Gatherpos: " << args);
+                //LOG("Gatherpos: " << args);
                 // gather
                 dview_m(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},
                                                        view, wlo, whi, args);

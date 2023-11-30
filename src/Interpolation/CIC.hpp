@@ -212,7 +212,7 @@ namespace ippl {
                 fromi[i] = floor(from_in_grid_coordinates[i]) + nghost;
                 toi[i]   = floor(to_in_grid_coordinates[i])   + nghost;
             }
-            LOG("fromi and toi: " << fromi << toi);
+            //LOG("fromi and toi: " << fromi << toi);
             ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
             ippl::Vector<IndexType, Dim> toi_local = toi - lDom.first();
             /*if(ippl::Comm->rank() == 0){
@@ -245,11 +245,11 @@ namespace ippl {
             for(int i = 0;i < 3;i++){
                 if(std::signbit(jcfrom[i]) != std::signbit(jcto[i])){
                     std::cerr << "Violation\n" << from << relay << to << "\n";
-                    abort();
+                    //abort();
                 }
             }
             //LOG("JCTO: " << jcfrom);
-            LOG("From to Relay: " << from << to << relay);
+            //LOG("From to Relay: " << from << to << relay);
             //LOG("Scale: " << scale);
             //std::cout << ippl::Comm->rank() << jcfrom << "   \t" << jcto << "\n";
             //std::cout << lDom.first() << "  ldf\n";
@@ -259,7 +259,7 @@ namespace ippl {
                 wlo[i] = T(1.0) - fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
                 whi[i] = fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
             }
-            LOG("Current weights: " << whi);
+            //LOG("Current weights: " << whi);
             // Perform the scatter operation for each scatter point
             auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
@@ -271,7 +271,7 @@ namespace ippl {
                 whi[i] = fractional_part((to[i] + relay[i]) * T(0.5) / hr[i]);
             }
 
-            LOG("Current weights: " << whi);
+            //LOG("Current weights: " << whi);
             
             auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,

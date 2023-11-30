@@ -583,7 +583,7 @@ namespace ippl {
         Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
             scalar charge = -Qview(i);
-            LOG("Egather: " << E_gatherview(i));
+            /*LOG("Egather: " << E_gatherview(i));
             LOG("Bgather: " << B_gatherview(i) << "\n\n");
             LOG("Agather: " << A_gatherview(i) << "\n\n");
 
@@ -593,7 +593,7 @@ namespace ippl {
                         LOG("A around: " << _anview((size_t)(rview(i)[0] / hr_m[0] + nghost_A + _i), (size_t)(rview(i)[1] / hr_m[1] + nghost_A + _j), (size_t)(rview(i)[2] / hr_m[2] + nghost_A + _k)) << _bnview((size_t)(rview(i)[0] / hr_m[0] + nghost_A + _i), (size_t)(rview(i)[1] / hr_m[1] + nghost_A + _j), (size_t)(rview(i)[2] / hr_m[2] + nghost_A + _k)));
                     }
                 }
-            }
+            }*/
             //using ::sqrt;
             const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
             const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
@@ -681,12 +681,12 @@ namespace ippl {
                         outward_normal[dd] = -1.0;
                     }
                 }
-                ref += dot_prod(radiation->getView()(i,j,k), outward_normal);
+                ref += dot_prod(radiation->getView()(i, j, k), outward_normal);
             }, radiation_on_boundary);
         Kokkos::fence();
         radiation_on_boundary = 0.0;
-        //tracer_bunch.E_gather.gather(*(this->En_mp), tracer_bunch.R);
-        //tracer_bunch.B_gather.gather(*(this->Bn_mp), tracer_bunch.R);
+        tracer_bunch.E_gather.gather(*(this->En_mp), tracer_bunch.R);
+        tracer_bunch.B_gather.gather(*(this->Bn_mp), tracer_bunch.R);
         auto tbev = tracer_bunch.E_gather.getView();
         auto tbbv = tracer_bunch.B_gather.getView();
         auto tnbv = tracer_bunch.outward_normal.getView();
