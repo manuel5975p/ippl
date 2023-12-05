@@ -126,7 +126,7 @@ namespace ippl {
             const std::index_sequence<Index...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             const Vector<T, Dim>& wlo, const Vector<T, Dim>& whi,
-            const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale);
+            const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale, const Vector<T, Dim>& hr, const NDIndex<Dim> lDom, int nghost, const Vector<T, Dim>& source);
         /**
          * @brief Scatter particles moving from 'from' to 'to' into a Kokkos View using zigzag
          * interpolation.

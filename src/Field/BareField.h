@@ -164,9 +164,9 @@ namespace ippl {
             return dview_m(args...);
         }
 
-        view_type& getView() { return dview_m; }
+        KOKKOS_INLINE_FUNCTION view_type& getView() { return dview_m; }
 
-        const view_type& getView() const { return dview_m; }
+        KOKKOS_INLINE_FUNCTION const view_type& getView() const { return dview_m; }
 
         HostMirror getHostMirror() const { return Kokkos::create_mirror(dview_m); }
 

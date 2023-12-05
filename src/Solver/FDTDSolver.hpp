@@ -281,7 +281,7 @@ _scalar bunch_energy(const Bunch<_scalar, PLayout>& bantsch){
         using Kokkos::sqrt;
         ippl::Vector<_scalar, 3> gbi = gamma_beta_view(i);
         gbi *= ippl::detail::Scalar<scalar>(mass_view(i));
-        scalar total_energy = mass_view(i) * mass_view(i) + gbi.squaredNorm();
+        scalar total_energy = gbi.squaredNorm();
         ref += sqrt(total_energy);
     }, ret);
     return ret;
@@ -452,9 +452,13 @@ namespace ippl {
                                       + a2 * (view_AN(i + 1, j, k)[gd] + view_AN(i - 1, j, k)[gd])
                                       + a4 * (view_AN(i, j + 1, k)[gd] + view_AN(i, j - 1, k)[gd])
                                       + a6 * (view_AN(i, j, k + 1)[gd] + view_AN(i, j, k - 1)[gd])
-                                      + a8 * (gd == 0 ? (-view_rhoN(i, j, k) / epsilon0) : (-view_JN(i, j, k)[gd - 1] * mu0));
+                                      + a8 * (gd == 0 ? (view_rhoN(i, j, k) / epsilon0) : (view_JN(i, j, k)[gd - 1] * mu0));
                     if(gd == 0 && view_rhoN(i, j, k) != 0){
-                        //LOG("rho source = " << view_rhoN(i,j,k) << ", " << view_JN(i, j, k) << "\t Value: " << view_AN(i,j,k)[0]);
+                        //LOG("rho source = " << view_rhoN(i,j,k) << ", " << view_JN(i, j, k) << "\t Value: " << view_ANm1(i,j,k)[0]);
+                        //LOG("next without sors " << -view_ANm1(i, j, k)[gd] + a1 * view_AN(i, j, k)[gd]
+                        //              + a2 * (view_AN(i + 1, j, k)[gd] + view_AN(i - 1, j, k)[gd])
+                        //              + a4 * (view_AN(i, j + 1, k)[gd] + view_AN(i, j - 1, k)[gd])
+                        //              + a6 * (view_AN(i, j, k + 1)[gd] + view_AN(i, j, k - 1)[gd]));
                     }
                     view_ANp1(i, j, k)[gd] = isInterior * interior + !isInterior * view_ANp1(i, j, k)[gd];
                 }
@@ -567,7 +571,7 @@ namespace ippl {
             ref += out_of_bounds;
         }, invalid_count);
         //bunch.destroy(invalid, invalid_count);
-        //bunch.E_gather.gather(*this->En_mp, bunch.R);
+        bunch.E_gather.gather(*this->En_mp, bunch.R);
         bunch.B_gather.gather(*this->Bn_mp, bunch.R);
         //bunch.A_gather.gather(this->ANp1_m, bunch.R);
         auto _anview = ANp1_m.getView();
@@ -576,6 +580,8 @@ namespace ippl {
         auto E_gatherview = bunch.E_gather.getView();
         auto B_gatherview = bunch.B_gather.getView();
         auto A_gatherview = bunch.A_gather.getView();
+        //LOG("Gathered E: " << E_gatherview(0));
+        //LOG("Gathered B: " << B_gatherview(0) << "\n\n");
         constexpr scalar e_mass = 0.5110;
         scalar this_dt = this->dt;
         int ronk = ippl::Comm->rank();
@@ -609,6 +615,7 @@ namespace ippl {
             rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));
             gammabeta_view(i) = ngammabeta;
         });
+
         this->JN_mp->operator=(0.0); //reset J to zero for next time step before scatter again
         
 

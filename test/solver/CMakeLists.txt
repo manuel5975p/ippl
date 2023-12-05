@@ -32,8 +32,9 @@ target_link_libraries (
     ${IPPL_LIBS}
     ${MPI_CXX_LIBRARIES}
     quadmath
-    EGL
+    eglutils
 )
+target_include_directories(TestFDTDSolver PUBLIC "${eglu_SOURCE_DIR}")
 target_include_directories(TestFDTDSolver PUBLIC "${pohxx_SOURCE_DIR}/include")
 
 if (ENABLE_FFT)

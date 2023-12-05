@@ -4,7 +4,10 @@
 //   global functions, but in order to support higher or lower order interpolation,
 //   these should be moved into structs.
 //
-
+#ifdef DEBUG_DRAW
+#include <eglutils.hpp>
+extern Font globalfont;
+#endif
 namespace ippl {
     namespace detail {
         template <unsigned long Point, unsigned long Index, typename Weights>
@@ -53,7 +56,55 @@ namespace ippl {
                 return;
             }
             Kokkos::atomic_add(&view(interpolationIndex<ScatterPoint, Index>(args)...),
-                               val * (interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...));
+                              val * (interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...));
+        }
+        template <unsigned long ScatterPoint, unsigned long... Index, typename Field, typename T,
+                  typename IndexType>
+        KOKKOS_INLINE_FUNCTION constexpr void scatterToPoint2(
+            const std::index_sequence<Index...>&, Field& f,
+            const Vector<T, Field::dim>& wlo, const Vector<T, Field::dim>& whi,
+            const Vector<IndexType, Field::dim>& args, const T& val, const Vector<T, Field::dim>& source) {
+            bool isinbound = true;
+            
+            ippl::Vector<IndexType, Field::dim> index3{interpolationIndex<ScatterPoint, Index>(args)...};
+            for(unsigned int d = 0; d < Field::dim;d++){
+                isinbound &= (index3[d] < f.getView().extent(d));
+                isinbound &= (index3[d] >= 0);
+            }
+            if(!isinbound){
+                //if(ippl::Comm->rank() == 0){
+                //    std::cout << "scatter cancelled!!\n";
+                //}
+                return;
+            }
+            #ifdef DEBUG_DRAW
+            auto tu_string = [](double x){
+                std::stringstream sstr;
+                sstr.precision(4);
+                sstr << x;
+                return sstr.str();
+            };
+            auto lDom = f.getLayout().getLocalNDIndex();
+            auto hr = f.get_mesh().getMeshSpacing();
+            const int nghost = f.getNghost();
+            auto lindex_lower = lDom.first();
+            rm::Vector<float, 3> vec;
+            using v3 = rm::Vector<float, 3>;
+            rc.draw_line(line_info{
+                .from = v3{((float)(source[Index] - hr[Index]))...},
+                .fcolor = v3{1.0f,0.0f,0.0f},
+                .to = v3{((index3[Index] + lindex_lower[Index] - nghost) * (float)hr[Index])...},
+                .tcolor = v3{1.0f,0.0f,0.0f}
+            });
+            v3 center = v3{((float)(source[Index] - hr[Index]))...} + v3{((index3[Index] + lindex_lower[Index] - nghost) * (float)hr[Index])...};
+            
+            DrawTextBillboard("Q = " + tu_string(val * (interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...)), ((float)((index3[Index] + lindex_lower[Index] - nghost) * hr[Index]))..., 0.05f, 1.0f,1.0f,1.0f);
+            //rc.draw_text("J", 100, 200, 1.0f, globalfont);
+            //LOG("Depot line drawn from " << v3{(source[Index])...} << " to " << v3{((index3[Index] + lindex_lower[Index] - nghost) * hr[Index])...});
+            #endif
+            auto view = f.getView();
+            Kokkos::atomic_add(&(view(interpolationIndex<ScatterPoint, Index>(args)...)),
+                              val * (interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...));
         }
 
         template <unsigned long... ScatterPoint, typename View, typename T, typename IndexType>
@@ -64,6 +115,17 @@ namespace ippl {
             // The number of indices is equal to the view rank
             (scatterToPoint<ScatterPoint>(std::make_index_sequence<View::rank>{}, view, wlo, whi,
                                           args, val),
+             ...);
+        }
+
+        template <unsigned long... ScatterPoint, typename Field, typename T, typename IndexType>
+        KOKKOS_INLINE_FUNCTION constexpr void scatterToField2(
+            const std::index_sequence<ScatterPoint...>&, Field& f,
+            const Vector<T, Field::dim>& wlo, const Vector<T, Field::dim>& whi,
+            const Vector<IndexType, Field::dim>& args, T val, const Vector<T, Field::dim>& source) {
+            // The number of indices is equal to the view rank
+            (scatterToPoint2<ScatterPoint>(std::make_index_sequence<Field::dim>{}, f, wlo, whi,
+                                          args, val, source),
              ...);
         }
 
@@ -131,7 +193,7 @@ namespace ippl {
             const std::index_sequence<Index...>&,
             const typename ippl::detail::ViewType<ippl::Vector<T, 3>, Dim>::view_type& view,
             const Vector<T, Dim>& wlo, const Vector<T, Dim>& whi,
-            const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale) {
+            const Vector<IndexType, Dim>& args, const Vector<T, Dim>& val, T scale, const Vector<T, Dim>& hr, const NDIndex<Dim> lDom, int nghost, const Vector<T, Dim>& source) {
             //std::cout << args[0] << " " << args[1] << " " << args[2] << std::endl;
             //assert(((zigzag_interpolationIndex<ScatterPoint, Index>(args) < view.extent(0)) && ...));
             bool isinbound = true;
@@ -146,6 +208,27 @@ namespace ippl {
                 //}
                 return 0;
             }
+            #ifdef DEBUG_DRAW
+            auto tu_string = [](double x){
+                std::stringstream sstr;
+                sstr.precision(4);
+                sstr << x;
+                return sstr.str();
+            };
+            auto lindex_lower = lDom.first();
+            rm::Vector<float, 3> vec;
+            using v3 = rm::Vector<float, 3>;
+            //rc.draw_line(line_info{
+            //    .from = v3{((float)(source[Index] - hr[Index]))...},
+            //    .fcolor = v3{1.0f,0.0f,0.0f},
+            //    .to = v3{((index3[Index] + lindex_lower[Index] - nghost) * (float)hr[Index])...},
+            //    .tcolor = v3{1.0f,0.0f,0.0f}
+            //});
+            v3 center = v3{((float)(source[Index] - hr[Index]))...} + v3{((index3[Index] + lindex_lower[Index] - nghost) * (float)hr[Index])...};
+            //rc.draw_text_billboard("J=" + tu_string(scale * val[1] * (zigzag_interpolationWeight<ScatterPoint, Index>(wlo, whi) * ...)), v3{((index3[Index] + lindex_lower[Index] - nghost) * hr[Index])...}, 0.1f, globalfont);
+            //rc.draw_text("J", 100, 200, 1.0f, globalfont);
+            //LOG("Depot line drawn from " << v3{(source[Index])...} << " to " << v3{((index3[Index] + lindex_lower[Index] - nghost) * hr[Index])...});
+            #endif
             //LOG("First_depot: " << depot);
             typename ippl::detail::ViewType<ippl::Vector<T, Dim>,
                                             Dim>::view_type::value_type::value_type* destptr =
@@ -255,15 +338,18 @@ namespace ippl {
             //std::cout << lDom.first() << "  ldf\n";
             // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;
+            Vector<T, Dim> source1, source2;
             for (unsigned i = 0; i < Dim; i++) {
                 wlo[i] = T(1.0) - fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
                 whi[i] = fractional_part((from[i] + relay[i]) * T(0.5) / hr[i]);
+                source1[i] = (from[i] + relay[i]) * T(0.5);
+                source2[i] = (to[i]   + relay[i]) * T(0.5);
             }
             //LOG("Current weights: " << whi);
             // Perform the scatter operation for each scatter point
             auto _ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
-                                                     whi, fromi_local, jcfrom, scale)
+                                                     whi, fromi_local, jcfrom, scale, hr, lDom, nghost, source1)
                  ^ ...);
             
             for (unsigned i = 0; i < Dim; i++) {
@@ -275,7 +361,7 @@ namespace ippl {
             
             auto __ =
                 (zigzag_scatterToPoint<ScatterPoint>(std::make_index_sequence<Dim>{}, view, wlo,
-                                                     whi, toi_local, jcto, scale)
+                                                     whi, toi_local, jcto, scale, hr, lDom, nghost, source2)
                  ^ ...);
 
             (void)_;

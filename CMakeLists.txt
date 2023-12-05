@@ -36,6 +36,13 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/Fytch/ProgramOptions.hxx
 )
 FetchContent_MakeAvailable(pohxx)
+include(FetchContent)
+FetchContent_Declare(
+    eglu
+    GIT_REPOSITORY https://github.com/manuel5975p/frast.git
+    GIT_TAG        egl_branch
+)
+FetchContent_MakeAvailable(eglu)
 find_package(Kokkos 4.0.0 REQUIRED)
 
 # Select flags.

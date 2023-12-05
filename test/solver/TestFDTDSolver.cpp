@@ -27,8 +27,8 @@
 // You should have received a copy of the GNU General Public License
 // along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
+#define DEBUG_DRAW
 #include <cstring>
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 const char* from_last_slash(const char* x){
     size_t len = std::strlen(x);
@@ -94,7 +94,6 @@ uint64_t nanoTime(){
     return duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 }
 constexpr double turbo_cm[256][3] = {  {0.18995,0.07176,0.23217},  {0.19483,0.08339,0.26149},  {0.19956,0.09498,0.29024},  {0.20415,0.10652,0.31844},  {0.20860,0.11802,0.34607},  {0.21291,0.12947,0.37314},  {0.21708,0.14087,0.39964},  {0.22111,0.15223,0.42558},  {0.22500,0.16354,0.45096},  {0.22875,0.17481,0.47578},  {0.23236,0.18603,0.50004},  {0.23582,0.19720,0.52373},  {0.23915,0.20833,0.54686},  {0.24234,0.21941,0.56942},  {0.24539,0.23044,0.59142},  {0.24830,0.24143,0.61286},  {0.25107,0.25237,0.63374},  {0.25369,0.26327,0.65406},  {0.25618,0.27412,0.67381},  {0.25853,0.28492,0.69300},  {0.26074,0.29568,0.71162},  {0.26280,0.30639,0.72968},  {0.26473,0.31706,0.74718},  {0.26652,0.32768,0.76412},  {0.26816,0.33825,0.78050},  {0.26967,0.34878,0.79631},  {0.27103,0.35926,0.81156},  {0.27226,0.36970,0.82624},  {0.27334,0.38008,0.84037},  {0.27429,0.39043,0.85393},  {0.27509,0.40072,0.86692},  {0.27576,0.41097,0.87936},  {0.27628,0.42118,0.89123},  {0.27667,0.43134,0.90254},  {0.27691,0.44145,0.91328},  {0.27701,0.45152,0.92347},  {0.27698,0.46153,0.93309},  {0.27680,0.47151,0.94214},  {0.27648,0.48144,0.95064},  {0.27603,0.49132,0.95857},  {0.27543,0.50115,0.96594},  {0.27469,0.51094,0.97275},  {0.27381,0.52069,0.97899},  {0.27273,0.53040,0.98461},  {0.27106,0.54015,0.98930},  {0.26878,0.54995,0.99303},  {0.26592,0.55979,0.99583},  {0.26252,0.56967,0.99773},  {0.25862,0.57958,0.99876},  {0.25425,0.58950,0.99896},  {0.24946,0.59943,0.99835},  {0.24427,0.60937,0.99697},  {0.23874,0.61931,0.99485},  {0.23288,0.62923,0.99202},  {0.22676,0.63913,0.98851},  {0.22039,0.64901,0.98436},  {0.21382,0.65886,0.97959},  {0.20708,0.66866,0.97423},  {0.20021,0.67842,0.96833},  {0.19326,0.68812,0.96190},  {0.18625,0.69775,0.95498},  {0.17923,0.70732,0.94761},  {0.17223,0.71680,0.93981},  {0.16529,0.72620,0.93161},  {0.15844,0.73551,0.92305},  {0.15173,0.74472,0.91416},  {0.14519,0.75381,0.90496},  {0.13886,0.76279,0.89550},  {0.13278,0.77165,0.88580},  {0.12698,0.78037,0.87590},  {0.12151,0.78896,0.86581},  {0.11639,0.79740,0.85559},  {0.11167,0.80569,0.84525},  {0.10738,0.81381,0.83484},  {0.10357,0.82177,0.82437},  {0.10026,0.82955,0.81389},  {0.09750,0.83714,0.80342},  {0.09532,0.84455,0.79299},  {0.09377,0.85175,0.78264},  {0.09287,0.85875,0.77240},  {0.09267,0.86554,0.76230},  {0.09320,0.87211,0.75237},  {0.09451,0.87844,0.74265},  {0.09662,0.88454,0.73316},  {0.09958,0.89040,0.72393},  {0.10342,0.89600,0.71500},  {0.10815,0.90142,0.70599},  {0.11374,0.90673,0.69651},  {0.12014,0.91193,0.68660},  {0.12733,0.91701,0.67627},  {0.13526,0.92197,0.66556},  {0.14391,0.92680,0.65448},  {0.15323,0.93151,0.64308},  {0.16319,0.93609,0.63137},  {0.17377,0.94053,0.61938},  {0.18491,0.94484,0.60713},  {0.19659,0.94901,0.59466},  {0.20877,0.95304,0.58199},  {0.22142,0.95692,0.56914},  {0.23449,0.96065,0.55614},  {0.24797,0.96423,0.54303},  {0.26180,0.96765,0.52981},  {0.27597,0.97092,0.51653},  {0.29042,0.97403,0.50321},  {0.30513,0.97697,0.48987},  {0.32006,0.97974,0.47654},  {0.33517,0.98234,0.46325},  {0.35043,0.98477,0.45002},  {0.36581,0.98702,0.43688},  {0.38127,0.98909,0.42386},  {0.39678,0.99098,0.41098},  {0.41229,0.99268,0.39826},  {0.42778,0.99419,0.38575},  {0.44321,0.99551,0.37345},  {0.45854,0.99663,0.36140},  {0.47375,0.99755,0.34963},  {0.48879,0.99828,0.33816},  {0.50362,0.99879,0.32701},  {0.51822,0.99910,0.31622},  {0.53255,0.99919,0.30581},  {0.54658,0.99907,0.29581},  {0.56026,0.99873,0.28623},  {0.57357,0.99817,0.27712},  {0.58646,0.99739,0.26849},  {0.59891,0.99638,0.26038},  {0.61088,0.99514,0.25280},  {0.62233,0.99366,0.24579},  {0.63323,0.99195,0.23937},  {0.64362,0.98999,0.23356},  {0.65394,0.98775,0.22835},  {0.66428,0.98524,0.22370},  {0.67462,0.98246,0.21960},  {0.68494,0.97941,0.21602},  {0.69525,0.97610,0.21294},  {0.70553,0.97255,0.21032},  {0.71577,0.96875,0.20815},  {0.72596,0.96470,0.20640},  {0.73610,0.96043,0.20504},  {0.74617,0.95593,0.20406},  {0.75617,0.95121,0.20343},  {0.76608,0.94627,0.20311},  {0.77591,0.94113,0.20310},  {0.78563,0.93579,0.20336},  {0.79524,0.93025,0.20386},  {0.80473,0.92452,0.20459},  {0.81410,0.91861,0.20552},  {0.82333,0.91253,0.20663},  {0.83241,0.90627,0.20788},  {0.84133,0.89986,0.20926},  {0.85010,0.89328,0.21074},  {0.85868,0.88655,0.21230},  {0.86709,0.87968,0.21391},  {0.87530,0.87267,0.21555},  {0.88331,0.86553,0.21719},  {0.89112,0.85826,0.21880},  {0.89870,0.85087,0.22038},  {0.90605,0.84337,0.22188},  {0.91317,0.83576,0.22328},  {0.92004,0.82806,0.22456},  {0.92666,0.82025,0.22570},  {0.93301,0.81236,0.22667},  {0.93909,0.80439,0.22744},  {0.94489,0.79634,0.22800},  {0.95039,0.78823,0.22831},  {0.95560,0.78005,0.22836},  {0.96049,0.77181,0.22811},  {0.96507,0.76352,0.22754},  {0.96931,0.75519,0.22663},  {0.97323,0.74682,0.22536},  {0.97679,0.73842,0.22369},  {0.98000,0.73000,0.22161},  {0.98289,0.72140,0.21918},  {0.98549,0.71250,0.21650},  {0.98781,0.70330,0.21358},  {0.98986,0.69382,0.21043},  {0.99163,0.68408,0.20706},  {0.99314,0.67408,0.20348},  {0.99438,0.66386,0.19971},  {0.99535,0.65341,0.19577},  {0.99607,0.64277,0.19165},  {0.99654,0.63193,0.18738},  {0.99675,0.62093,0.18297},  {0.99672,0.60977,0.17842},  {0.99644,0.59846,0.17376},  {0.99593,0.58703,0.16899},  {0.99517,0.57549,0.16412},  {0.99419,0.56386,0.15918},  {0.99297,0.55214,0.15417},  {0.99153,0.54036,0.14910},  {0.98987,0.52854,0.14398},  {0.98799,0.51667,0.13883},  {0.98590,0.50479,0.13367},  {0.98360,0.49291,0.12849},  {0.98108,0.48104,0.12332},  {0.97837,0.46920,0.11817},  {0.97545,0.45740,0.11305},  {0.97234,0.44565,0.10797},  {0.96904,0.43399,0.10294},  {0.96555,0.42241,0.09798},  {0.96187,0.41093,0.09310},  {0.95801,0.39958,0.08831},  {0.95398,0.38836,0.08362},  {0.94977,0.37729,0.07905},  {0.94538,0.36638,0.07461},  {0.94084,0.35566,0.07031},  {0.93612,0.34513,0.06616},  {0.93125,0.33482,0.06218},  {0.92623,0.32473,0.05837},  {0.92105,0.31489,0.05475},  {0.91572,0.30530,0.05134},  {0.91024,0.29599,0.04814},  {0.90463,0.28696,0.04516},  {0.89888,0.27824,0.04243},  {0.89298,0.26981,0.03993},  {0.88691,0.26152,0.03753},  {0.88066,0.25334,0.03521},  {0.87422,0.24526,0.03297},  {0.86760,0.23730,0.03082},  {0.86079,0.22945,0.02875},  {0.85380,0.22170,0.02677},  {0.84662,0.21407,0.02487},  {0.83926,0.20654,0.02305},  {0.83172,0.19912,0.02131},  {0.82399,0.19182,0.01966},  {0.81608,0.18462,0.01809},  {0.80799,0.17753,0.01660},  {0.79971,0.17055,0.01520},  {0.79125,0.16368,0.01387},  {0.78260,0.15693,0.01264},  {0.77377,0.15028,0.01148},  {0.76476,0.14374,0.01041},  {0.75556,0.13731,0.00942},  {0.74617,0.13098,0.00851},  {0.73661,0.12477,0.00769},  {0.72686,0.11867,0.00695},  {0.71692,0.11268,0.00629},  {0.70680,0.10680,0.00571},  {0.69650,0.10102,0.00522},  {0.68602,0.09536,0.00481},  {0.67535,0.08980,0.00449},  {0.66449,0.08436,0.00424},  {0.65345,0.07902,0.00408},  {0.64223,0.07380,0.00401},  {0.63082,0.06868,0.00401},  {0.61923,0.06367,0.00410},  {0.60746,0.05878,0.00427},  {0.59550,0.05399,0.00453},  {0.58336,0.04931,0.00486},  {0.57103,0.04474,0.00529},  {0.55852,0.04028,0.00579},  {0.54583,0.03593,0.00638},  {0.53295,0.03169,0.00705},  {0.51989,0.02756,0.00780},  {0.50664,0.02354,0.00863},  {0.49321,0.01963,0.00955},  {0.47960,0.01583,0.01055} };
-using Color = rm::Vector<float, 4>;
 inline Color jet(double t){
     Color ret;
     int index = (int)(t * 256.0);
@@ -156,12 +155,12 @@ struct generate_random {
         for (unsigned d = 0; d < Dim; ++d) {
             typename T::value_type w = inside[d].max() - inside[d].min();
             if(d != 1){
-                Rview (i)[d] = rand_gen.drand(w * 0.5, w * 0.5);
+                Rview (i)[d] = rand_gen.drand(inside[d].min() + w * 0.5, inside[d].min() + w * 0.5);
                 GBview(i)[d] = rand_gen.drand(0.0, 0.0);
             }
             else{
-                Rview (i)[d] = rand_gen.drand(inside[d].min() + 0.4 * w, inside[d].min() + 0.45 * w);
-                GBview(i)[d] = rand_gen.drand(2.0, 2.0);
+                Rview (i)[d] = rand_gen.drand(inside[d].min() + 0.5 * w, inside[d].min() + 0.5 * w);
+                GBview(i)[d] = rand_gen.drand(10.0, 10.0);
             }
             
             //GBview(i)[d] /= Kokkos::abs(GBview(i)[d]);
@@ -668,134 +667,47 @@ void draw_vfield_arrows(ippl::NDIndex<3U> lindex, Field f, Color /*lc will be se
     uint64_t nghost = (uint64_t)f.getNghost();
     Kokkos::deep_copy(bhmirror, f.getView());
 
-    //std::vector<float> vertices;
-    //vertices.reserve(12 * (bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost));
-    GLuint VBO;
-    glGenBuffers(1, &VBO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        (12 * (bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost)) * sizeof(float),
-        nullptr, GL_STATIC_DRAW
-    );
-    float* vbobuf = (float*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-    float* vbobuf_cptr = vbobuf;
     double ratio = 100000.0 / double((bhmirror.extent(0) - 2 * nghost) * (bhmirror.extent(1) - 2 * nghost) * (bhmirror.extent(2) - 2 * nghost));
     std::bernoulli_distribution dis(std::min(ratio, 1.0));
     
     uint64_t emitted_line_vertices = 0;
     xoshiro_256 gen(42);
-    serial_for<Dim>([&](uint64_t i, uint64_t j, uint64_t k){
-        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.00001));
+    serial_for<Dim>([&](int64_t i, int64_t j, int64_t k){
+        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.0015));
         i += lindex_lower[0] - nghost;
         j += lindex_lower[1] - nghost;
         k += lindex_lower[2] - nghost;
-
         Color c = jet(bv.norm() * 10.0);
-        /*vertices.push_back((float)(i * spacing[0]));
-        vertices.push_back((float)(j * spacing[1]));
-        vertices.push_back((float)(k * spacing[2]));
-        vertices.push_back(c.x());
-        vertices.push_back(c.y());
-        vertices.push_back(c.z());
-        vertices.push_back((float)(i * spacing[0] + bv[0]));
-        vertices.push_back((float)(j * spacing[1] + bv[1]));
-        vertices.push_back((float)(k * spacing[2] + bv[2]));
-        vertices.push_back(c.x());
-        vertices.push_back(c.y());
-        vertices.push_back(c.z());*/
 
-        if(dis(gen)){
-            *(vbobuf_cptr++) = ((float)(i * spacing[0]));
-            *(vbobuf_cptr++) = ((float)(j * spacing[1]));
-            *(vbobuf_cptr++) = ((float)(k * spacing[2]));
-            *(vbobuf_cptr++) = (c.x());
-            *(vbobuf_cptr++) = (c.y());
-            *(vbobuf_cptr++) = (c.z());
-            *(vbobuf_cptr++) = ((float)(i * spacing[0] + bv[0]));
-            *(vbobuf_cptr++) = ((float)(j * spacing[1] + bv[1]));
-            *(vbobuf_cptr++) = ((float)(k * spacing[2] + bv[2]));
-            *(vbobuf_cptr++) = (c.x());
-            *(vbobuf_cptr++) = (c.y());
-            *(vbobuf_cptr++) = (c.z());
-            emitted_line_vertices += 2;
-        }
-        //std::cout << (float)(i * spacing[0] + bv[0]) << "\n";
-
-        //rm::Vector<float, 3> origin{(float)(i * spacing[0]), (float)(j * spacing[1]), (float)(k * spacing[2])};
-        //rm::Vector<float, 3> to = {(float)(origin.x + bv[0]), (float)(origin.y + bv[1]), (float)(origin.z + bv[2])};
+        using v3 = rm::Vector<float, 3>;
+        rc.draw_line(line_info{
+            .from = v3{(float)((i + 0.0f) * spacing[0]), (float)((j + 0.0f) * spacing[1]), (float)((k + 0.0f) * spacing[2])},
+            .fcolor = v3{c.x(), c.y(), c.z()},
+            .to = v3{(float)((i + 0.0f) * spacing[0] + bv[0]), (float)((j + 0.0f) * spacing[1] + bv[1]), (float)((k + 0.0f) * spacing[2] + bv[2])},
+            .tcolor = v3{c.x(), c.y(), c.z()}
+        });
         
     }, {nghost,nghost, nghost}, {bhmirror.extent(0) - nghost, bhmirror.extent(1) - nghost, bhmirror.extent(2) - nghost});
-    //vertices = {
-    //     0.0f,  0.0f, 0.0f, 1.f, 0.f, 1.f,
-    //     1.0f,  1.0f, 0.0f, 0.f, 1.f, 0.f
-    //};
-    glUnmapBuffer(GL_ARRAY_BUFFER);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    GLuint VAO;
-
-    glLineWidth(3);
-    glGenVertexArrays(1, &VAO);
-    
-
-    glBindVertexArray(VAO);
-
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    //glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices[0]), vertices.data(), GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
-    glEnableVertexAttribArray(0);
-
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-    glBindVertexArray(VAO);
-    glDrawArrays(GL_LINES, 0, emitted_line_vertices);
-    glBindVertexArray(0);
-
-    /*auto lindex_lower = lindex.first();
-    auto lindex_upper = lindex.last();
-
-    typename Field::view_type::host_mirror_type bhmirror = f.getHostMirror();
-    using scalar = Field::view_type::value_type::value_type;
-    ippl::Vector<scalar, 3> spacing = f.get_mesh().getMeshSpacing();
-    uint64_t nghost = (uint64_t)f.getNghost();
-    Kokkos::deep_copy(bhmirror, f.getView());
-    serial_for<Dim>(KOKKOS_LAMBDA(uint64_t i, uint64_t j, uint64_t k){
-        ippl::Vector<scalar, 3> bv = bhmirror(i, j, k) * (scalar(0.1));
-        i += lindex_lower[0] - nghost;
-        j += lindex_lower[1] - nghost;
-        k += lindex_lower[2] - nghost;
-        Vector3<float> origin{(float)(i * spacing[0]), (float)(j * spacing[1]), (float)(k * spacing[2])};
-        Vector3<float> to = {(float)(origin.x + bv[0]), (float)(origin.y + bv[1]), (float)(origin.z + bv[2])};
-        DrawBillboardLineEx(origin, to, lt, jet(bv.norm() * 50.0));
-    }, {nghost,nghost, nghost}, {bhmirror.extent(0) - nghost, bhmirror.extent(1) - nghost, bhmirror.extent(2) - nghost});*/
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
 }
-
+Font globalfont;
 template<typename bunch_type, typename spsc>
-void draw_particle_bunch(const bunch_type& b,ippl::Vector<spsc, 3> spacing, Mesh to_use){
-    
+void draw_particle_bunch(const bunch_type& b,ippl::Vector<spsc, 3> spacing, rm::Vector<float, 3> color, float scale){
     auto bunch_r_view = b.R.getView();
     using scalar = typename decltype(b.R)::view_type::value_type::value_type;
     typename decltype(b.R)::view_type::host_mirror_type brmirror = Kokkos::create_mirror(bunch_r_view);
     Kokkos::deep_copy(brmirror, bunch_r_view);
     std::vector<float> lbuf;
     lbuf.reserve(3 * b.getLocalNum());
-    
+    using v3 = rm::Vector<float, 3>;
     for(size_t i = 0;i < b.getLocalNum();i++){
         ippl::Vector<scalar, 3> bv = brmirror(i);
-        lbuf.push_back(bv[0] + spacing[0] * 0.5);
-        lbuf.push_back(bv[1] + spacing[1] * 0.5);
-        lbuf.push_back(bv[2] + spacing[2] * 0.5);
+        
+        rc.draw_sphere(sphere_info{.pos = v3{(float)(bv[0] - spacing[0] * 0.5), (float)(bv[1] - spacing[1] * 0.5), (float)(bv[2] - spacing[2] * 0.5)},
+                                   .color = v3{color.x(), color.y(), color.z()},
+                                    .radius = (float)(spacing[0] * scale * 0.2)});
+        //rc.draw_text_billboard("ELECTRON", v3{(float)(bv[0] - spacing[0] * 0.5), (float)(bv[1] - spacing[1] * 0.5), (float)(bv[2] - spacing[2] * 0.5)}, 1.0f, globalfont, Color{0,1,0,1});
     }
-    vaovbo sphere_mesh_vaovbo = to_vao(to_use, lbuf.data(), b.getLocalNum());
-    glBindVertexArray(sphere_mesh_vaovbo.vao);
-    glDrawArraysInstanced(GL_TRIANGLES, 0, to_use.vertexCount,  b.getLocalNum());
-    glBindVertexArray(0);
-    sphere_mesh_vaovbo.destroy();
+    
 }
 int main(int argc, char* argv[]) {
     ippl::initialize(argc, argv);
@@ -972,16 +884,16 @@ int main(int argc, char* argv[]) {
             int rink = ippl::Comm->rank();
             Kokkos::parallel_for(
                 Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
-                //generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-                //    solver.bunch.R.getView(),
-                //    solver.bunch.gamma_beta.getView(),
-                //    regions_view(rink),
-                //    rand_pool
-                //)
-                KOKKOS_LAMBDA(size_t idx){
-                    srview(idx) = ippl::Vector<scalar, Dim>{0.0, scalar(idx) / count, 0.0};
-                    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
-                }
+                generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                    solver.bunch.R.getView(),
+                    solver.bunch.gamma_beta.getView(),
+                    regions_view(rink),
+                    rand_pool
+                )
+                //KOKKOS_LAMBDA(size_t idx){
+                //    srview(idx) = ippl::Vector<scalar, Dim>{0.5, 0.5, 0.5};
+                //    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 30.0, 0.0};
+                //}
             );
         }
         LOG("Initial bunch energy: " << bunch_energy(solver.bunch));
@@ -1005,7 +917,7 @@ int main(int argc, char* argv[]) {
         //solver.phiN_m.setFieldBC(scalar_bcs);
         //solver.phiNp1_m.setFieldBC(scalar_bcs);
         //solver.phiNm1_m.setFieldBC(scalar_bcs);
-        solver.bunch.setParticleBC(ippl::PERIODIC);
+        solver.bunch.setParticleBC(ippl::NO);
         
         solver.bconds[0] = ippl::MUR_ABC_1ST;
         solver.bconds[1] = ippl::MUR_ABC_1ST;
@@ -1036,24 +948,26 @@ int main(int argc, char* argv[]) {
         initial_phi_solver.solve();
         //LOG("RHOSUM: " << rho.sum());
         rho = ippl::laplace(phi_ic);
-        //LOG("RHOSUM: " << phi_ic.sum());
         
+        //std::cout << phi_ic(10,10,10) << " AUGH\n";
+        //LOG("RHOSUM: " << phi_ic.sum());
+        auto view_phiic = phi_ic.getView();
         if (!seed) {
-            auto view_phiic = phi_ic.getView();
+            
             // add pulse at center of domain
             auto view_rho    = rho.getView();
             auto view_urho    = urho.getView();
-            //Kokkos::parallel_for(ippl::getRangePolicy(view_rho, 28), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
-                //if((i | j | k) < 6){
-                //    std::cout << "Laplace of Solution = " << rho(i,j,k) << ", ";
-                //    std::cout << "RHS = " << view_urho(i,j,k) << ", ";
-                //    std::cout << rho(i,j,k) - view_urho(i,j,k) << "\n";
-                //}
-            //});
+            Kokkos::parallel_for(ippl::getRangePolicy(view_rho, view_rho.extent(0) / 2 - 3), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+                //if(view_urho(i, j, k) != 0.0)
+                {
+                    std::cout << "-Laplace of Solution = " << -rho(i,j,k) << ", ";
+                    std::cout << "RHS = " << view_urho(i,j,k) << ", ";
+                    std::cout << (-rho(i,j,k)) - view_urho(i,j,k) << "\n";
+                }
+            });
             //Kokkos::parallel_for(ippl::getRangePolicy(view_rho, 28), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
             //    std::cout << view_phiic(i,j,k) << " ";
             //});
-            std::cout << "\n\n\n";
 
 
             //const int nghost = rho.getNghost();
@@ -1063,8 +977,9 @@ int main(int argc, char* argv[]) {
             //if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z) {
-                    ippl::Vector<scalar, 4> ret{-view_phiic(i, j, k), 0.0, x * 70.0f, 0.0};
-                    //std::cout << x << " x\n";
+                    ippl::Vector<scalar, 4> ret{view_phiic(i, j, k), 0.0, x * 70.0f, 0.0};
+                    //if(abs(view_phiic(i, j, k)) > 0.1)
+                    //    std::cout << view_phiic(i, j, k) << " x\n";
                     //ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.1);
                     (void)x;
                     (void)y;
@@ -1079,6 +994,8 @@ int main(int argc, char* argv[]) {
         //std::cout << "Before first step: " << solver.field_evaluation() << " ";
         //std::cout << solver.total_energy << "\n";
         auto start_time = nanoTime();
+        LOG("Solver AN: " << solver.AN_m(10, 10, 10)[0]);
+        LOG("phiic: " << view_phiic(10,10,10));
         solver.solve();
         std::cout.precision(10);
         LOG("After first step: " << solver.total_energy);
@@ -1088,8 +1005,7 @@ int main(int argc, char* argv[]) {
         std::vector<scalar> energies;
         //constexpr unsigned int ww = 1280, wh = 720;
         load_context(drawing_resolution.x(), drawing_resolution.y());
-        if(draw)
-            glDisable(GL_CULL_FACE);
+        
         shader shad(
 R"(#version 430 core
 layout (location = 0) in vec3 aPos;
@@ -1127,9 +1043,15 @@ void main() {
     FragColor = vec4(fragc.xyz, 1.0);
 })");
         Mesh sphere_mesh = GenMeshSphere(0.5f * hr[0], 12, 12);
-        if(draw)
+        if(draw){
+            rc.init(drawing_resolution.x(), drawing_resolution.y());
+            glDisable(GL_CULL_FACE);
             glEnable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        }
         std::vector<std::thread> lol;
+        rc.load_default_font();
         std::vector<ippl::Vector<scalar, 3>> trajectory0; // Trajectory of first particle
         FILE* ffmpeg_file;
         if(ippl::Comm->rank() == 0 && draw)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 60 -i - -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p autput.mp4", "w");
@@ -1145,30 +1067,39 @@ void main() {
                 //const int nghost = rho.getNghost();
                 //auto ldom        = layout.getLocalNDIndex();
             }
-
+            if(draw){
+                //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            }
             solver.solve();
-            std::cout << "Total: " << solver.total_energy << "\n";
-            std::cout << "Absorbed: " << solver.absorbed__energy << "\n";
+            //std::cout << "Total: " << solver.total_energy << "\n";
+            //std::cout << "Absorbed: " << solver.absorbed__energy << "\n";
             //if(it > iterations / 6)
             energies.push_back(solver.total_energy);
             
             if(draw){
                 float rotate_speed = (float)(1.0 / time_simulated);
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                
                 using vec3 = rm::camera::vec3;
                 //vec3 camoff{(float)(-1.6 * Kokkos::cos(rotate_speed * (it * dt))), float(-0.8), (float)(-1.6 * Kokkos::sin(rotate_speed * (it * dt)))};
-                vec3 camoff{(float)(0.0f), float(-0.4), -0.8f};
+                vec3 camoff{(float)(0.0f), float(-0.4), -1.9f};
                 //Vector3<float> campos{(float)(0), float(0), (float)(-80.0)};
+                
                 vec3 center{0.5f, 0.5f, 0.5f};
+                if(solver.bunch.getLocalNum() > 0){
+                    
+                    ippl::Vector<scalar, Dim> focus = solver.bunch.R.getView()(0);
+                    center = vec3{(float)focus[0], (float)focus[1], (float)focus[2]};
+                    camoff = vec3{(float)(0.07f), float(0.05), -0.15f};
+                }
                 vec3 campos = center + camoff;
                 vec3 look {-camoff.x(), -camoff.y(), -camoff.z()};
-                
                 rm::camera cam(campos, look);
-                glUseProgram(shad.shaderProgram);
-                shad.setMat4("pv", cam.matrix(drawing_resolution.x(), drawing_resolution.y()));
-                glUseProgram(ishad.shaderProgram);
-                ishad.setMat4("pv", cam.matrix(drawing_resolution.x(), drawing_resolution.y()));
-                ishad.setvec3("ucol", rm::Vector<float, 3>{0.0f,1.0f,0.0f});
+                LookAt(campos, look);
+                //glUseProgram(shad.shaderProgram);
+                //shad.setMat4("pv", cam.matrix(drawing_resolution.x(), drawing_resolution.y()));
+                //glUseProgram(ishad.shaderProgram);
+                //ishad.setMat4("pv", cam.matrix(drawing_resolution.x(), drawing_resolution.y()));
+                //ishad.setVec3("ucol", rm::Vector<float, 3>{0.0f,1.0f,0.0f});
                 glUseProgram(0);
                 //LOG(look << "\n");
                 //LOG(cam.look_dir() << "\n");
@@ -1201,33 +1132,61 @@ void main() {
                     (float)(((rankm3 >> 2) & 1)), 1.0f
                 };
                 {
-                    glUseProgram(shad.shaderProgram);
-                    draw_domain_wireframe(solver.layout_mp->getLocalNDIndex(),fieldB.get_mesh().getMeshSpacing(), lc, lt);
-                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), radiation, lc, lt);
-                    glUseProgram(ishad.shaderProgram);
-                    ishad.setvec3("ucol", rm::Vector<float, 3>{0.0f,1.0f,0.0f});
-                    ishad.setfloat("scale", 1.0f);
-
-                    draw_particle_bunch(solver.bunch, fieldB.get_mesh().getMeshSpacing(), sphere_mesh);
-                    ishad.setvec3("ucol", rm::Vector<float, 3>{0.0f,0.7f,1.0f});
-                    ishad.setfloat("scale", 0.3f);
-                    draw_particle_bunch(solver.tracer_bunch, fieldB.get_mesh().getMeshSpacing(), sphere_mesh);
-                    {
-                        auto bunch_r_view = solver.bunch.R.getView();
-                        using scalar = typename decltype(solver.bunch.R)::view_type::value_type::value_type;
-                        typename decltype(solver.bunch.R)::view_type::host_mirror_type brmirror = Kokkos::create_mirror(bunch_r_view);
-                        Kokkos::deep_copy(brmirror, bunch_r_view);
-                        if(solver.bunch.getLocalNum() > 0){
-                            trajectory0.push_back(brmirror(0));
-                        }
-                        glUseProgram(shad.shaderProgram);
-                        draw_particle_trajectory(trajectory0);
-                    }
+                    //glUseProgram(shad.shaderProgram);
+                    //draw_domain_wireframe(solver.layout_mp->getLocalNDIndex(),fieldB.get_mesh().getMeshSpacing(), lc, lt);
+                    
+                    draw_vfield_arrows<3>(solver.layout_mp->getLocalNDIndex(), fieldE, lc, lt);
+                    draw_particle_bunch(solver.bunch, fieldB.get_mesh().getMeshSpacing(), rm::Vector<float, 3>{0,1,0}, 0.7f);
+                    //ishad.setVec3("ucol", rm::Vector<float, 3>{0.0f,0.7f,1.0f});
+                    //ishad.setFloat("scale", 0.3f);
+                    //draw_particle_bunch(solver.tracer_bunch, fieldB.get_mesh().getMeshSpacing(), rm::Vector<float, 3>{1,0.6,0.2}, 0.2f);
+                    rc.draw();
+                    DrawText("Total Energy: " + std::to_string(solver.total_energy), 0, 50, 0.5f, 1,1,1);
+                    DrawText("Particle Energy: " + std::to_string(bunch_energy(solver.bunch)), 0, 100, 0.5f, 0.5f,1,0.5f);
+                    //glUseProgram(ishad.shaderProgram);
+                    //ishad.setVec3("ucol", rm::Vector<float, 3>{0.0f,1.0f,0.0f});
+                    //ishad.setFloat("scale", 1.0f);
+//
+                    
+                    //{
+                    //    auto bunch_r_view = solver.bunch.R.getView();
+                    //    using scalar = typename decltype(solver.bunch.R)::view_type::value_type::value_type;
+                    //    typename decltype(solver.bunch.R)::view_type::host_mirror_type brmirror = Kokkos::create_mirror(bunch_r_view);
+                    //    Kokkos::deep_copy(brmirror, bunch_r_view);
+                    //    if(solver.bunch.getLocalNum() > 0){
+                    //        trajectory0.push_back(brmirror(0));
+                    //    }
+                    //    glUseProgram(shad.shaderProgram);
+                    //    draw_particle_trajectory(trajectory0);
+                    //}
                     std::vector<unsigned char> pixels(3 * drawing_resolution.x() * drawing_resolution.y(), 0);  // Assuming RGB
                     std::vector<float> depths(drawing_resolution.x() * drawing_resolution.y(), 0);
 
                     glReadPixels(0, 0, drawing_resolution.x(), drawing_resolution.y(), GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
                     glReadPixels(0, 0, drawing_resolution.x(), drawing_resolution.y(), GL_DEPTH_COMPONENT, GL_FLOAT, depths.data());
+                    ClearFrame();
+                    for(int i = 0;i < drawing_resolution.y();i++){
+                        for(int j = 0;j < drawing_resolution.x();j++){
+                            int di = (i * drawing_resolution.x() + j);
+                            int dib = ((drawing_resolution.y() - i - 1) * drawing_resolution.x() + j);
+                            int i1 = (i * drawing_resolution.x() + j) * 3;
+                            int i2 = ((drawing_resolution.y() - i - 1) * drawing_resolution.x() + j) * 3;
+                            //{
+                            //    pixels[i1+0] = (unsigned char)(pixels[i2+0] * 255);
+                            //    pixels[i1+1] = (unsigned char)(pixels[i2+1] * 255);
+                            //    pixels[i1+2] = (unsigned char)(pixels[i2+2] * 255);
+                            //}
+                            //pixels[i1] = (unsigned char)(dpixels[i1 / 3] * 255);
+                            //pixels[i1+1] = (unsigned char)(dpixels[i1 / 3] * 255);
+                            //pixels[i1+2] = (unsigned char)(dpixels[i1 / 3] * 255);
+                            if(i < drawing_resolution.y() / 2){
+                                std::iter_swap(depths.begin() + di, depths.begin() + dib);
+                                std::iter_swap(pixels.begin() + i1 + 0, pixels.begin() + i2 + 0);
+                                std::iter_swap(pixels.begin() + i1 + 1, pixels.begin() + i2 + 1);
+                                std::iter_swap(pixels.begin() + i1 + 2, pixels.begin() + i2 + 2);
+                            }
+                        }
+                    }
                     int size = ippl::Comm->size();
                     int rank = ippl::Comm->rank();
                     for (int stride = 1; stride < size; stride *= 2) {

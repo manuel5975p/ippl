@@ -132,6 +132,8 @@ namespace ippl {
             "ParticleAttrib::scatter", policy_type(0, *(this->localNum_mp)),
             KOKKOS_CLASS_LAMBDA(const size_t idx) {
                 // find nearest grid point
+
+                vector_type pos_from_o               = (pp(idx) - origin) + dx * 0.5;
                 vector_type l                        = (pp(idx) - origin) * invdx + 0.5;
                 Vector<int, Field::dim> index        = l;
                 Vector<PositionType, Field::dim> whi = l - index;
@@ -142,9 +144,9 @@ namespace ippl {
                 // scatter
                 value_type val = dview_m(idx);
                 val *= (invdx[0] * invdx[1] * invdx[2]);
-                LOG("Charge weights: " << whi);
-                detail::scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, wlo, whi,
-                                       args, val);
+                //LOG("Charge weights: " << whi);
+                detail::scatterToField2(std::make_index_sequence<1 << Field::dim>{}, f, wlo, whi,
+                                       args, val, pos_from_o);
             });
         IpplTimings::stopTimer(scatterTimer);
 
