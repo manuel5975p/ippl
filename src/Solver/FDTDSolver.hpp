@@ -436,6 +436,7 @@ namespace ippl {
         bunch.Q.scatter(*rhoN_mp, bunch.R);
         auto view_rhoN = this->rhoN_mp->getView();
         AN_m.getFieldBC().apply(AN_m);
+        rhoN_mp->getFieldBC().apply(*rhoN_mp);
         Kokkos::parallel_for(
             "4-Vector potential update", ippl::getRangePolicy(view_AN, nghost_A),
             KOKKOS_CLASS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -526,22 +527,22 @@ namespace ippl {
                     if(+bocc[gd]){
                         int offs = bocc[gd] == AT_MIN ? 1 : -1;
                         if(gd == 0){
-                            //view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i + offs, j, k) - view_AN(i, j, k)) * this->dt / hr_m[0];
-                            view_ANp1(i, j, k) = abc_x[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
+                            view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i + offs, j, k) - view_AN(i, j, k)) * this->dt / hr_m[0];
+                            //view_ANp1(i, j, k) = abc_x[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
                             //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
                             //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
                             //view_aNp1(i, j, k) = abc_x[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 1){
-                            //view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j + offs, k) - view_AN(i, j, k)) * this->dt / hr_m[1];
-                            view_ANp1(i, j, k) = abc_y[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
+                            view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j + offs, k) - view_AN(i, j, k)) * this->dt / hr_m[1];
+                            //view_ANp1(i, j, k) = abc_y[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
                             //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
                             //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
                             //view_aNp1(i, j, k) = abc_y[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                         }
                         if(gd == 2){
-                            //view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j, k + offs) - view_AN(i, j, k)) * this->dt / hr_m[2];
-                            view_ANp1(i, j, k) = abc_z[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
+                            view_ANp1(i, j, k) = view_AN(i, j, k) + (view_AN(i, j, k + offs) - view_AN(i, j, k)) * this->dt / hr_m[2];
+                            //view_ANp1(i, j, k) = abc_z[bocc[gd] >> 1](view_AN, view_ANm1, view_ANp1, ippl::Vector<size_t, 3>({i, j, k}));
                             //view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
                             //view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
                             //view_aNp1(i, j, k) = abc_z[bocc[gd] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
@@ -551,7 +552,10 @@ namespace ippl {
             }
         );
         Kokkos::fence();
+        ANp1_m.getFieldBC().apply(ANp1_m);
         field_evaluation();
+        En_mp->getFieldBC().apply(*En_mp);
+        Bn_mp->getFieldBC().apply(*Bn_mp);
         auto gammabeta_view = bunch.gamma_beta.getView();
         auto Qview = bunch.Q.getView();
         auto rview = bunch.R.getView();
@@ -589,9 +593,10 @@ namespace ippl {
         Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
             using Kokkos::sqrt;
             scalar charge = -Qview(i);
-            /*LOG("Egather: " << E_gatherview(i));
-            LOG("Bgather: " << B_gatherview(i) << "\n\n");
-            LOG("Agather: " << A_gatherview(i) << "\n\n");
+            if(abs(E_gatherview(i)[1]) > 10)
+                LOG("Egather: " << E_gatherview(i));
+            //LOG("Bgather: " << B_gatherview(i) << "\n\n");
+            /*LOG("Agather: " << A_gatherview(i) << "\n\n");
 
             for(int _j = -2;_j <= 2;_j++){
                 for(int _i = -2;_i <= 2;_i++){
@@ -692,8 +697,8 @@ namespace ippl {
             }, radiation_on_boundary);
         Kokkos::fence();
         radiation_on_boundary = 0.0;
-        tracer_bunch.E_gather.gather(*(this->En_mp), tracer_bunch.R);
-        tracer_bunch.B_gather.gather(*(this->Bn_mp), tracer_bunch.R);
+        //tracer_bunch.E_gather.gather(*(this->En_mp), tracer_bunch.R);
+        //tracer_bunch.B_gather.gather(*(this->Bn_mp), tracer_bunch.R);
         auto tbev = tracer_bunch.E_gather.getView();
         auto tbbv = tracer_bunch.B_gather.getView();
         auto tnbv = tracer_bunch.outward_normal.getView();

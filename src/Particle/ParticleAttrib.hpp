@@ -245,8 +245,13 @@ namespace ippl {
                 Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
                 dview_m(idx) = typename vector_type::value_type(0.0);
                 for(size_t i = 0;i < Field::dim;i++){
-                    if(args[i] >= (view.extent(i) - 1))return;
-                    if(args[i] < (size_t)nghost)return;
+                    bool ret = false;
+                    if(args[i] >= (view.extent(i) - 1))ret = true;
+                    if(args[i] < (size_t)nghost)ret = true;
+                    if(ret){
+                        std::cout << "ParticleAttrib::gather: out of bounds" << vector_type(pp(idx) - origin) << ", " << args << std::endl;
+                        return;
+                    }
                 }
                 //LOG("Gatherpos: " << args);
                 // gather

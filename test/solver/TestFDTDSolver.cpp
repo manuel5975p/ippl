@@ -154,13 +154,14 @@ struct generate_random {
         value_type u;
         for (unsigned d = 0; d < Dim; ++d) {
             typename T::value_type w = inside[d].max() - inside[d].min();
-            if(d != 1){
+            if(d == 5){
                 Rview (i)[d] = rand_gen.drand(inside[d].min() + w * 0.5, inside[d].min() + w * 0.5);
                 GBview(i)[d] = rand_gen.drand(0.0, 0.0);
             }
             else{
-                Rview (i)[d] = rand_gen.drand(inside[d].min() + 0.5 * w, inside[d].min() + 0.5 * w);
-                GBview(i)[d] = rand_gen.drand(10.0, 10.0);
+                //Rview (i)[d] = rand_gen.drand(inside[d].min() + 0.5 * w, inside[d].min() + 0.5 * w);
+                Rview (i)[d] = rand_gen.normal(inside[d].min() + 0.5 * w, 0.1 * w);
+                GBview(i)[d] = rand_gen.drand(1.0, 1.0) * value_type(d == 1);
             }
             
             //GBview(i)[d] /= Kokkos::abs(GBview(i)[d]);
@@ -884,22 +885,29 @@ int main(int argc, char* argv[]) {
             int rink = ippl::Comm->rank();
             Kokkos::parallel_for(
                 Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
-                generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-                    solver.bunch.R.getView(),
-                    solver.bunch.gamma_beta.getView(),
-                    regions_view(rink),
-                    rand_pool
-                )
-                //KOKKOS_LAMBDA(size_t idx){
-                //    srview(idx) = ippl::Vector<scalar, Dim>{0.5, 0.5, 0.5};
-                //    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 30.0, 0.0};
-                //}
+                //generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                //    solver.bunch.R.getView(),
+                //    solver.bunch.gamma_beta.getView(),
+                //    regions_view(rink),
+                //    rand_pool
+                //)
+                KOKKOS_LAMBDA(size_t idx){
+                    srview(idx) = ippl::Vector<scalar, Dim>{0.5, 0.5, 0.5};
+                    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.5, 0.0};
+                }
             );
         }
         LOG("Initial bunch energy: " << bunch_energy(solver.bunch));
+        constexpr bool periodic = true;
         auto bcsetter_single = [&vector_bcs, &ic_scalar_bcs, hr, dt]<size_t Idx>(const std::index_sequence<Idx>&){
-            ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
-            vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
+            if(periodic){
+                ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
+                vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<s_t::both_potential_t>>(Idx);
+            }
+            else{
+                ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
+                vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<s_t::both_potential_t>>(Idx);
+            }
             return 0;
         };
         auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
@@ -917,11 +925,11 @@ int main(int argc, char* argv[]) {
         //solver.phiN_m.setFieldBC(scalar_bcs);
         //solver.phiNp1_m.setFieldBC(scalar_bcs);
         //solver.phiNm1_m.setFieldBC(scalar_bcs);
-        solver.bunch.setParticleBC(ippl::NO);
+        solver.bunch.setParticleBC(periodic ? ippl::PERIODIC : ippl::NO);
         
-        solver.bconds[0] = ippl::MUR_ABC_1ST;
-        solver.bconds[1] = ippl::MUR_ABC_1ST;
-        solver.bconds[2] = ippl::MUR_ABC_1ST;
+        solver.bconds[0] = periodic ? ippl::PERIODIC_FACE : ippl::MUR_ABC_1ST;
+        solver.bconds[1] = periodic ? ippl::PERIODIC_FACE : ippl::MUR_ABC_1ST;
+        solver.bconds[2] = periodic ? ippl::PERIODIC_FACE : ippl::MUR_ABC_1ST;
         
         decltype(solver)::bunch_type bunch_buffer(solver.pl);
         solver.pl.update(solver.bunch/*, bunch_buffer*/);
@@ -977,7 +985,7 @@ int main(int argc, char* argv[]) {
             //if(false)
             solver.fill_initialcondition(
                 KOKKOS_LAMBDA(const int i, const int j, const int k, scalar x, scalar y, scalar z) {
-                    ippl::Vector<scalar, 4> ret{view_phiic(i, j, k), 0.0, x * 70.0f, 0.0};
+                    ippl::Vector<scalar, 4> ret{view_phiic(i, j, k), 0.0, x * 0.0f, 0.0};
                     //if(abs(view_phiic(i, j, k)) > 0.1)
                     //    std::cout << view_phiic(i, j, k) << " x\n";
                     //ret[2] = 1.0 * gauss(ippl::Vector<scalar, 3> {x, y, 0.5}, 0.5, 0.1);
@@ -1054,7 +1062,7 @@ void main() {
         rc.load_default_font();
         std::vector<ippl::Vector<scalar, 3>> trajectory0; // Trajectory of first particle
         FILE* ffmpeg_file;
-        if(ippl::Comm->rank() == 0 && draw)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 60 -i - -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p autput.mp4", "w");
+        if(ippl::Comm->rank() == 0 && draw)ffmpeg_file = popen("turboffmpeg -y -f image2pipe -framerate 30 -i - -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p autput.mp4", "w");
         for (unsigned int it = 1; it < iterations; ++it) {
             //if(ippl::Comm->rank() == 0)
             //    LOG("Timestep number: " << it);
@@ -1141,8 +1149,14 @@ void main() {
                     //ishad.setFloat("scale", 0.3f);
                     //draw_particle_bunch(solver.tracer_bunch, fieldB.get_mesh().getMeshSpacing(), rm::Vector<float, 3>{1,0.6,0.2}, 0.2f);
                     rc.draw();
-                    DrawText("Total Energy: " + std::to_string(solver.total_energy), 0, 50, 0.5f, 1,1,1);
-                    DrawText("Particle Energy: " + std::to_string(bunch_energy(solver.bunch)), 0, 100, 0.5f, 0.5f,1,0.5f);
+                    DrawText("Total Energy: " + std::to_string(solver.total_energy), 0, 50, 0.5f, 1, 1, 1);
+                    DrawText("Particle Energy: " + std::to_string(bunch_energy(solver.bunch)), 0, 100, 0.5f, 0.5f, 1, 0.5f);
+                    auto tu_string = [](const auto& x){
+                        std::stringstream sstr;
+                        sstr << x;
+                        return sstr.str();
+                    };
+                    DrawText("Particle Position: " + tu_string(solver.bunch.R.getView()(0)), 0, 125, 0.25f, 0.5f,1,0.5f);
                     //glUseProgram(ishad.shaderProgram);
                     //ishad.setVec3("ucol", rm::Vector<float, 3>{0.0f,1.0f,0.0f});
                     //ishad.setFloat("scale", 1.0f);

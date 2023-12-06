@@ -75,6 +75,7 @@ namespace ippl {
                 //if(ippl::Comm->rank() == 0){
                 //    std::cout << "scatter cancelled!!\n";
                 //}
+                LOG("OUTOFBOUND: " << source);
                 return;
             }
             #ifdef DEBUG_DRAW
@@ -93,7 +94,7 @@ namespace ippl {
             rc.draw_line(line_info{
                 .from = v3{((float)(source[Index] - hr[Index]))...},
                 .fcolor = v3{1.0f,0.0f,0.0f},
-                .to = v3{((index3[Index] + lindex_lower[Index] - nghost) * (float)hr[Index])...},
+                .to = v3{((double(index3[Index] + lindex_lower[Index]) - nghost) * (float)hr[Index])...},
                 .tcolor = v3{1.0f,0.0f,0.0f}
             });
             v3 center = v3{((float)(source[Index] - hr[Index]))...} + v3{((index3[Index] + lindex_lower[Index] - nghost) * (float)hr[Index])...};
@@ -327,7 +328,7 @@ namespace ippl {
             jcto -= relay;
             for(int i = 0;i < 3;i++){
                 if(std::signbit(jcfrom[i]) != std::signbit(jcto[i])){
-                    std::cerr << "Violation\n" << from << relay << to << "\n";
+                    //std::cerr << "Violation\n" << from << relay << to << "\n";
                     //abort();
                 }
             }
