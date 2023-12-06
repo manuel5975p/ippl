@@ -154,6 +154,7 @@ int main(int argc, char* argv[]) {
         }
 
         // unit box
+        bool periodic = false;
         double dx                        = 1.0 / nr[0];
         double dy                        = 1.0 / nr[1];
         double dz                        = 1.0 / nr[2];
@@ -165,7 +166,7 @@ int main(int argc, char* argv[]) {
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
         const double c = 1.0;  // 299792458.0;
-        double dt      = std::min({dx, dy, dz}) * 0.1 / c;
+        double dt      = std::min({dx, dy, dz}) * 0.5 / c;
 
         // all parallel layout, standard domain, normal axis order
         ippl::FieldLayout<Dim> layout(owned, decomp);
@@ -173,6 +174,7 @@ int main(int argc, char* argv[]) {
         // define the R (rho) field
         Field_t rho;
         rho.initialize(mesh, layout);
+        rho = 0.0;
         //lambda_dispatch(rho, 1, 
         //KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ){
         //    //std::printf("%ld, %ld, %ld, %s\n", i, j, k, to_string(occ).c_str());
@@ -193,19 +195,49 @@ int main(int argc, char* argv[]) {
         current = 0.0;
 
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
-        bool seed = true;
+        bool seed = false;
 
         // define an FDTDSolver object
+        typename VField_t::BConds_t vector_bcs;
+        typename Field_t::BConds_t scalar_bcs;
         ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, dt, seed);
 
+        auto bcsetter_single = [&scalar_bcs, &vector_bcs, hr, dt, periodic]<size_t Idx>(const std::index_sequence<Idx>&){
+            if(periodic){
+                //std::cout << "Setting piriodic\n";
+                vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<VField_t>>(Idx);
+                scalar_bcs[Idx] = std::make_shared<ippl::PeriodicFace<Field_t>>(Idx);
+            }
+            else{
+                vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<VField_t>>(Idx);
+                scalar_bcs[Idx] = std::make_shared<ippl::NoBcFace<Field_t>>(Idx);
+            }
+            return 0;
+        };
+        auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
+            int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
+            (void) x;
+        };
+        bcsetter(std::make_index_sequence<Dim * 2>{});
+        solver.aN_m  .setFieldBC(vector_bcs);
+        solver.aNp1_m.setFieldBC(vector_bcs);
+        solver.aNm1_m.setFieldBC(vector_bcs);
+
+        solver.phiN_m  .setFieldBC(scalar_bcs);
+        solver.phiNm1_m.setFieldBC(scalar_bcs);
+        solver.phiNp1_m.setFieldBC(scalar_bcs);
+        solver.phiN_m = 0;
+        solver.phiNm1_m = 0;
         if (!seed) {
             // add pulse at center of domain
             auto view_rho    = rho.getView();
+            auto view_A      = solver.aN_m.getView();
+            auto view_Am1      = solver.aNm1_m.getView();
             const int nghost = rho.getNghost();
             auto ldom        = layout.getLocalNDIndex();
 
             Kokkos::parallel_for(
-                "Assign sinusoidal source at center", rho.getFieldRangePolicy(),
+                "Assign gaussian cylinder", ippl::getRangePolicy(view_A, 1),
                 KOKKOS_LAMBDA(const int i, const int j, const int k) {
                     const int ig = i + ldom[0].first() - nghost;
                     const int jg = j + ldom[1].first() - nghost;
@@ -216,8 +248,9 @@ int main(int argc, char* argv[]) {
                     double y = (jg + 0.5) * hr[1] + origin[1];
                     double z = (kg + 0.5) * hr[2] + origin[2];
 
-                    if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                        view_rho(i, j, k) = sine(0, dt);
+                    //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
+                    view_A  (i, j, k)[1] = 0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_Am1(i, j, k)[1] = 0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
             });
         }
 
@@ -228,7 +261,7 @@ int main(int argc, char* argv[]) {
         for (unsigned int it = 1; it < iterations; ++it) {
             msg << "Timestep number = " << it << " , time = " << it * dt << endl;
 
-            if (!seed) {
+            /*if (!seed) {
                 // add pulse at center of domain
                 auto view_rho    = rho.getView();
                 const int nghost = rho.getNghost();
@@ -249,11 +282,11 @@ int main(int argc, char* argv[]) {
                         if ((x == 0.5) && (y == 0.5) && (z == 0.5))
                             view_rho(i, j, k) = sine(it, dt);
                 });
-            }
+            }*/
 
             solver.solve();
 
-            dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+            dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
         }
     }
     ippl::finalize();
