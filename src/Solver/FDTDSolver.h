@@ -21,7 +21,7 @@
 
 #include "Types/Vector.h"
 
-#include "Solver/BoundaryDispatch.h"
+//#include "Solver/BoundaryDispatch.h"
 #include "Field/Field.h"
 
 #include "FieldLayout/FieldLayout.h"
@@ -49,7 +49,7 @@ namespace ippl {
         typedef FieldLayout<Dim> FieldLayout_t;
 
         // type for communication buffers
-        using buffer_type = Communicate::buffer_type<memory_space>;
+        //using buffer_type = Communicate::buffer_type<memory_space>;
 
         // constructor and destructor
         FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B, FDTDBoundaryCondition bcond = FDTDBoundaryCondition::PERIODIC,

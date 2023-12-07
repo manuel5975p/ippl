@@ -36,7 +36,7 @@
 #include "Utility/IpplTimings.h"
 
 #include "Solver/FDTDSolver.h"
-#include "Solver/BoundaryDispatch.h"
+//#include "Solver/BoundaryDispatch.h"
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
@@ -148,9 +148,10 @@ int main(int argc, char* argv[]) {
         }
 
         // specifies decomposition; here all dimensions are parallel
-        ippl::e_dim_tag decomp[Dim];
+
+        ippl::e_cube_tag decomp[Dim];
         for (unsigned int d = 0; d < Dim; d++) {
-            decomp[d] = ippl::PARALLEL;
+            decomp[d] = ippl::IS_PARALLEL;
         }
 
         // unit box
@@ -169,7 +170,9 @@ int main(int argc, char* argv[]) {
         double dt      = std::min({dx, dy, dz}) * 0.5 / c;
 
         // all parallel layout, standard domain, normal axis order
-        ippl::FieldLayout<Dim> layout(owned, decomp);
+        std::array<bool, Dim> isParallel;
+        isParallel.fill(true);
+        ippl::FieldLayout<Dim> layout(MPI_COMM_WORLD, owned, isParallel);
 
         // define the R (rho) field
         Field_t rho;
@@ -213,7 +216,7 @@ int main(int argc, char* argv[]) {
             auto ldom        = layout.getLocalNDIndex();
 
             Kokkos::parallel_for(
-                "Assign gaussian cylinder", ippl::getRangePolicy(view_A, 1),
+                "Assign gaussian cylinder", ippl::getRangePolicy(view_A, 2),
                 KOKKOS_LAMBDA(const int i, const int j, const int k) {
                     const int ig = i + ldom[0].first() - nghost;
                     const int jg = j + ldom[1].first() - nghost;
@@ -225,8 +228,8 @@ int main(int argc, char* argv[]) {
                     double z = (kg + 0.5) * hr[2] + origin[2];
 
                     //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                    view_A  (i, j, k)[1] = 0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
-                    view_Am1(i, j, k)[1] = 0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_A  (i, j, k)[1] = -0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_Am1(i, j, k)[1] = -0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
 
                     (void)x;(void)y;(void)z;
                     (void)ig;(void)jg;(void)kg; //Suppress warnings lol

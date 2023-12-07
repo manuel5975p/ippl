@@ -289,9 +289,9 @@ namespace ippl {
             "Scalar potential update", ippl::getRangePolicy(view_phiN, nghost_phi),
             KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                 // global indices
-                const int ig = i + ldom[0].first() - nghost_phi;
-                const int jg = j + ldom[1].first() - nghost_phi;
-                const int kg = k + ldom[2].first() - nghost_phi;
+                //const int ig = i + ldom[0].first() - nghost_phi;
+                //const int jg = j + ldom[1].first() - nghost_phi;
+                //const int kg = k + ldom[2].first() - nghost_phi;
 
                 // interior values
                 bool isInterior = true;//((ig > 0) && (jg > 0) && (kg > 0) && (ig < nr_m[0] - 1)
@@ -310,9 +310,9 @@ namespace ippl {
                 "Vector potential update", ippl::getRangePolicy(view_aN, nghost_a),
                 KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                     // global indices
-                    const int ig = i + ldom[0].first() - nghost_a;
-                    const int jg = j + ldom[1].first() - nghost_a;
-                    const int kg = k + ldom[2].first() - nghost_a;
+                    //const int ig = i + ldom[0].first() - nghost_a;
+                    //const int jg = j + ldom[1].first() - nghost_a;
+                    //const int kg = k + ldom[2].first() - nghost_a;
 
                     // interior values
                     bool isInterior = true;//((ig > 0) && (jg > 0) && (kg > 0) && (ig < nr_m[0] - 1)
@@ -409,7 +409,6 @@ namespace ippl {
                     
                     for(unsigned _d = 0;_d < Dim;_d++){
                         if(+bocc[_d]){
-                            int offs = bocc[_d] == AT_MIN ? 1 : -1;
                             if(_d == 0){
                                 view_phiNp1(i, j, k) = abc_x[bocc[_d] >> 1](view_phiN, view_phiNm1, view_phiNp1, ippl::Vector<size_t, 3>({i, j, k}));
                             }
@@ -434,7 +433,6 @@ namespace ippl {
                         ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
                         for(unsigned _d = 0;_d < Dim;_d++){
                             if(+bocc[_d]){
-                                int offs = bocc[_d] == AT_MIN ? 1 : -1;
                                 if(_d == 0){
                                     view_aNp1(i, j, k) = abc_x[bocc[_d] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
                                 }
@@ -471,40 +469,6 @@ namespace ippl {
         // we take the average of the potential at N and N+1
         auto Aview = this->aN_m.getView();
         auto Ap1view = this->aNp1_m.getView();
-        if(false)
-        lambda_dispatch(*Bn_mp, 1, KOKKOS_LAMBDA(size_t i, size_t j, size_t k, boundary_occlusion occ){
-            if(__builtin_popcount((unsigned int)occ) == 1){
-                switch(occ){
-                    case x_min:
-                    Aview(i, j, k) = Aview(i + 1, j, k) * 2.0 - Aview(i + 2, j, k);
-                    Ap1view(i, j, k) = Ap1view(i + 1, j, k) * 2.0 - Ap1view(i + 2, j, k);
-                    break;
-                    case x_max:
-                    Aview(i, j, k) = Aview(i - 1, j, k) * 2.0 - Aview(i - 2, j, k);
-                    Ap1view(i, j, k) = Ap1view(i - 1, j, k) * 2.0 - Ap1view(i - 2, j, k);
-                    break;
-                    case y_min:
-                    Aview(i, j, k) = Aview(i, j+1, k) * 2.0 - Aview(i, j+2, k);
-                    Ap1view(i, j, k) = Ap1view(i, j+1, k) * 2.0 - Ap1view(i, j+2, k);
-                    break;
-                    case y_max:
-                    Aview(i, j, k)   = Aview  (i, j-1, k) * 2.0 - Aview  (i, j-2, k);
-                    Ap1view(i, j, k) = Ap1view(i, j-1, k) * 2.0 - Ap1view(i, j-2, k);
-                    break;
-                    case z_min:
-                    Aview(i, j, k)   = Aview  (i, j, k+1) * 2.0 - Aview  (i, j, k+2);
-                    Ap1view(i, j, k) = Ap1view(i, j, k+1) * 2.0 - Ap1view(i, j, k+2);
-                    break;
-                    case z_max:
-                    Aview(i, j, k)   = Aview  (i, j, k-1) * 2.0 - Aview  (i, j, k-2);
-                    Ap1view(i, j, k) = Ap1view(i, j, k-1) * 2.0 - Ap1view(i, j, k-2);
-                    break;
-                }
-            }
-        },
-        KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
-            CAST_TO_VOID(i, j, k);
-        });
         
         (*Bn_mp) = 0.5 * (curl(aN_m) + curl(aNp1_m));
 
