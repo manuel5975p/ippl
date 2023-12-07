@@ -20,20 +20,6 @@
 //     in order to simulate the Two stream instability or bump on tail instability
 //     cases
 //
-// Copyright (c) 2021, Sriramkrishnan Muralikrishnan,
-// Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 
 #include <Kokkos_MathematicalConstants.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
@@ -170,7 +156,7 @@ struct PhaseDump {
     void initialize(size_t nr, double domain) {
         ippl::Index I(nr);
         ippl::NDIndex<2> owned(I, I);
-        layout = FieldLayout_t<2>(owned, serial);
+        layout = FieldLayout_t<2>(MPI_COMM_WORLD, owned, isParallel);
 
         Vector_t<double, 2> hx = {domain / nr, 16. / nr};
         Vector_t<double, 2> origin{0, -8};
@@ -226,7 +212,7 @@ struct PhaseDump {
     double minRecorded() const { return minValue; }
 
 private:
-    ippl::e_dim_tag serial[2] = {ippl::SERIAL, ippl::SERIAL};
+    std::array<bool, 2> isParallel = {false, false};
     FieldLayout_t<2> layout;
     Mesh_t<2> mesh;
     Field_t<2> phaseSpace, phaseSpaceBuf;
@@ -277,10 +263,8 @@ int main(int argc, char* argv[]) {
             domain[i] = ippl::Index(nr[i]);
         }
 
-        ippl::e_dim_tag decomp[Dim];
-        for (unsigned d = 0; d < Dim; ++d) {
-            decomp[d] = ippl::PARALLEL;
-        }
+        std::array<bool, Dim> isParallel;
+        isParallel.fill(true);
 
         Vector_t<double, Dim> kw;
         double sigma, muBulk, muBeam, epsilon, delta;
@@ -323,7 +307,7 @@ int main(int argc, char* argv[]) {
 
         const bool isAllPeriodic = true;
         Mesh_t<Dim> mesh(domain, hr, origin);
-        FieldLayout_t<Dim> FL(domain, decomp, isAllPeriodic);
+        FieldLayout_t<Dim> FL(MPI_COMM_WORLD, domain, isParallel, isAllPeriodic);
         PLayout_t<double, Dim> PL(FL, mesh);
 
         // Q = -\int\int f dx dv
@@ -335,13 +319,11 @@ int main(int argc, char* argv[]) {
                                 "Open boundaries solver incompatible with this simulation!");
         }
 
-        P = std::make_shared<bunch_type>(PL, hr, rmin, rmax, decomp, Q, solver);
+        P = std::make_shared<bunch_type>(PL, hr, rmin, rmax, isParallel, Q, solver);
 
         P->nr_m = nr;
 
         P->initializeFields(mesh, FL);
-
-        bunch_type bunchBuffer(PL);
 
         P->initSolver();
         P->time_m                 = 0.0;
@@ -372,7 +354,7 @@ int main(int argc, char* argv[]) {
             Kokkos::fence();
 
             P->initializeORB(FL, mesh);
-            P->repartition(FL, mesh, bunchBuffer, isFirstRepartition);
+            P->repartition(FL, mesh, isFirstRepartition);
             IpplTimings::stopTimer(domainDecomposition);
         }
 
@@ -479,14 +461,14 @@ int main(int argc, char* argv[]) {
 
             // Since the particles have moved spatially update them to correct processors
             IpplTimings::startTimer(updateTimer);
-            PL.update(*P, bunchBuffer);
+            P->update();
             IpplTimings::stopTimer(updateTimer);
 
             // Domain Decomposition
             if (P->balance(totalP, it + 1)) {
                 msg << "Starting repartition" << endl;
                 IpplTimings::startTimer(domainDecomposition);
-                P->repartition(FL, mesh, bunchBuffer, isFirstRepartition);
+                P->repartition(FL, mesh, isFirstRepartition);
                 IpplTimings::stopTimer(domainDecomposition);
                 // IpplTimings::startTimer(dumpDataTimer);
                 // P->dumpLocalDomains(FL, it+1);

@@ -2,19 +2,6 @@
 // Unit test ParticleBCTest
 //   Test particle boundary conditions.
 //
-// Copyright (c) 2020, Matthias Frey, Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 #include "Ippl.h"
 
 #include "TestUtils.h"
@@ -67,13 +54,10 @@ public:
     }
 
     void checkResult(const ippl::Vector<T, Dim>& expected) {
-        T tol = (std::is_same_v<T, double>) ? 1e-15 : 1e-7;
-
         Kokkos::deep_copy(mirror, bunch->R.getView());
-
         for (int i = 0; i < nParticles; ++i) {
             for (size_t j = 0; j < Dim; ++j) {
-                ASSERT_NEAR(expected[j], mirror(i)[j], tol);
+                ASSERT_NEAR(expected[j], mirror(i)[j], tolerance<T> / 10);
             }
         }
     }

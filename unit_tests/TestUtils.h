@@ -1,19 +1,6 @@
 //
 // Utilities for versatile unit testing
 //
-// Copyright (c) 2023 Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 
 #ifndef TEST_UTILS_H
 #define TEST_UTILS_H
@@ -24,7 +11,6 @@
 #include "Utility/TypeUtils.h"
 #include "Utility/ViewUtils.h"
 
-#include "MultirankUtils.h"
 #include "gtest/gtest.h"
 
 /*!
@@ -95,6 +81,17 @@ struct TestForTypes<std::tuple<Types...>> {
     using type = ::testing::Types<Types...>;
 };
 
+/*!
+ * Numerical tolerance for equality checks for computed results
+ * @tparam T precision
+ */
+template <typename T>
+constexpr T tolerance = std::is_same_v<T, double> ? 1e-13 : 1e-6;
+
+/*!
+ * Verifies that two values are equal to the correct level of precision
+ * @tparam T data type
+ */
 template <typename T>
 void assertEqual(T valA, T valB) {
     if constexpr (std::is_same_v<T, double>) {
@@ -104,6 +101,12 @@ void assertEqual(T valA, T valB) {
     }
 };
 
+/*!
+ * Generates the mesh refinement for unit tests such that the refinement and domain
+ * are heterogeneous along all axes
+ * @tparam Dim number of dimensions
+ * @return Mesh refinement
+ */
 template <unsigned Dim>
 constexpr std::array<size_t, Dim> getGridSizes() {
     constexpr unsigned max = std::max(6U, Dim);
@@ -118,6 +121,10 @@ constexpr std::array<size_t, Dim> getGridSizes() {
     return nr;
 }
 
+/*!
+ * Dummy struct for holding an unsigned number as a template parameter
+ * @param _ number of dimensions
+ */
 template <unsigned>
 struct Rank;
 

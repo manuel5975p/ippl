@@ -8,19 +8,6 @@
 //// Usage:
 ////   srun ./TestHessian N 0 --info 10
 ////
-//// Copyright (c) 2022, Sonali Mayani,
-//// Paul Scherrer Institut, Villigen, Switzerland
-//// All rights reserved
-////
-//// This file is part of IPPL.
-////
-//// IPPL is free software: you can redistribute it and/or modify
-//// it under the terms of the GNU General Public License as published by
-//// the Free Software Foundation, either version 3 of the License, or
-//// (at your option) any later version.
-////
-//// You should have received a copy of the GNU General Public License
-//// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 ////
 //
 
@@ -52,12 +39,11 @@ int main(int argc, char* argv[]) {
         ippl::NDIndex<dim> owned(I, I, I);
 
         // Specifies SERIAL, PARALLEL dims
-        ippl::e_dim_tag decomp[dim];
-        for (unsigned int d = 0; d < dim; d++)
-            decomp[d] = ippl::PARALLEL;
+        std::array<bool, dim> isParallel;
+        isParallel.fill(true);
 
         // all parallel layout, standard domain, normal axis order
-        ippl::FieldLayout<dim> layout(owned, decomp);
+        ippl::FieldLayout<dim> layout(MPI_COMM_WORLD, owned, isParallel);
 
         // type definitions
         typedef ippl::Vector<double, dim> Vector_t;
@@ -168,8 +154,7 @@ int main(int argc, char* argv[]) {
                     Kokkos::Sum<double>(valN));
 
                 double globalN(0.0);
-                MPI_Allreduce(&valN, &globalN, 1, MPI_DOUBLE, MPI_SUM,
-                              ippl::Comm->getCommunicator());
+                ippl::Comm->allreduce(valN, globalN, 1, std::plus<double>());
                 double errorN = std::sqrt(globalN);
 
                 double valD(0.0);
@@ -186,8 +171,7 @@ int main(int argc, char* argv[]) {
                     Kokkos::Sum<double>(valD));
 
                 double globalD(0.0);
-                MPI_Allreduce(&valD, &globalD, 1, MPI_DOUBLE, MPI_SUM,
-                              ippl::Comm->getCommunicator());
+                ippl::Comm->allreduce(valD, globalD, 1, std::plus<double>());
                 double errorD = std::sqrt(globalD);
 
                 // Compute relative Error

@@ -2,19 +2,6 @@
 // Class Ippl
 //   Ippl environment.
 //
-// Copyright (c) 2020, Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 #include <Kokkos_Core.hpp>
 #include "Ippl.h"
 
@@ -27,7 +14,9 @@
 namespace ippl {
 
     void initialize(int& argc, char* argv[], MPI_Comm comm) {
-        Comm = std::make_unique<ippl::Communicate>(argc, argv, comm);
+        Env = std::make_unique<mpi::Environment>(argc, argv, comm);
+
+        Comm = std::make_unique<mpi::Communicator>(comm);
 
         Info  = std::make_unique<Inform>("Ippl");
         Warn  = std::make_unique<Inform>("Warning", std::cerr);
@@ -39,7 +28,7 @@ namespace ippl {
             int nargs     = 0;
             while (nargs < argc) {
                 if (detail::checkOption(argv[nargs], "--help", "-h")) {
-                    if (Comm->myNode() == 0) {
+                    if (Comm->rank() == 0) {
                         IpplInfo::printHelp(argv);
                     }
                     std::exit(0);
@@ -92,14 +81,14 @@ namespace ippl {
             Error->setOutputLevel(0);
             Warn->setOutputLevel(0);
 
-            if (infoLevel > 0 && Comm->myNode() == 0) {
+            if (infoLevel > 0 && Comm->rank() == 0) {
                 for (auto& l : notparsed) {
                     std::cout << "Warning: Option '" << l << "' is not parsed by Ippl."
                               << std::endl;
                 }
             }
         } catch (const std::exception& e) {
-            if (Comm->myNode() == 0) {
+            if (Comm->rank() == 0) {
                 std::cerr << e.what() << std::endl;
             }
             std::exit(0);
@@ -111,6 +100,10 @@ namespace ippl {
     void finalize() {
         Comm->deleteAllBuffers();
         Kokkos::finalize();
+        // we must first delete the communicator and
+        // afterwards the MPI environment
+        Comm.reset(nullptr);
+        Env.reset(nullptr);
     }
 
     void fence() {

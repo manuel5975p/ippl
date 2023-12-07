@@ -1,6 +1,6 @@
 //
 // TestSphere
-// This programs tests the FFTPoissonSolver for the gravitational case.
+// This programs tests the FFTOpenPoissonSolver for the gravitational case.
 // The source is a constant term which is 0 outside a certain radius,
 // and the exact solution is the gravitational potential of a sphere.
 //   Usage:
@@ -10,19 +10,6 @@
 //     Example:
 //       srun ./TestSphere HOCKNEY --info 5
 //
-// Copyright (c) 2023, Sonali Mayani,
-// Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
 
 #include "Ippl.h"
@@ -30,7 +17,7 @@
 #include <Kokkos_MathematicalConstants.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
 
-#include "Solver/FFTPoissonSolver.h"
+#include "PoissonSolvers/FFTOpenPoissonSolver.h"
 
 KOKKOS_INLINE_FUNCTION double source(double x, double y, double z, double density = 1.0,
                                      double R = 1.0, double mu = 1.2) {
@@ -75,16 +62,15 @@ int main(int argc, char* argv[]) {
             ippl::NDIndex<3> owned(I, I, I);
 
             // specifies decomposition; here all dimensions are parallel
-            ippl::e_dim_tag decomp[3];
-            for (unsigned int d = 0; d < 3; d++)
-                decomp[d] = ippl::PARALLEL;
+            std::array<bool, 3> isParallel;
+            isParallel.fill(true);
 
             using Mesh_t      = ippl::UniformCartesian<double, 3>;
             using Centering_t = Mesh_t::DefaultCentering;
             using Vector_t    = ippl::Vector<double, 3>;
             typedef ippl::Field<double, 3, Mesh_t, Centering_t> field;
             typedef ippl::Field<Vector_t, 3, Mesh_t, Centering_t> vfield;
-            using Solver_t = ippl::FFTPoissonSolver<vfield, field>;
+            using Solver_t = ippl::FFTOpenPoissonSolver<vfield, field>;
 
             // unit box
             double dx       = 2.4 / pt;
@@ -93,7 +79,7 @@ int main(int argc, char* argv[]) {
             Mesh_t mesh(owned, hx, origin);
 
             // all parallel layout, standard domain, normal axis order
-            ippl::FieldLayout<3> layout(owned, decomp);
+            ippl::FieldLayout<3> layout(MPI_COMM_WORLD, owned, isParallel);
 
             // define the L (phi) and R (rho) fields
             field rho;
@@ -160,7 +146,7 @@ int main(int argc, char* argv[]) {
                 throw IpplException("TestGaussian.cpp main()", "Unrecognized algorithm type");
             }
 
-            // define an FFTPoissonSolver object
+            // define an FFTOpenPoissonSolver object
             Solver_t FFTsolver(rho, params);
 
             // solve the Poisson equation -> rho contains the solution (phi) now

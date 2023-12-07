@@ -2,19 +2,6 @@
 // Unit test Halo
 //   Test halo cell functionality and communication, as well as field layout neighbor finding
 //
-// Copyright (c) 2023, Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 #include "Ippl.h"
 
 #include "TestUtils.h"
@@ -54,14 +41,14 @@ public:
         ippl::Vector<T, Dim> hx;
         ippl::Vector<T, Dim> origin;
 
-        ippl::e_dim_tag domDec[Dim];  // Specifies SERIAL, PARALLEL dims
+        std::array<bool, Dim> isParallel;
+        isParallel.fill(true);  // Specifies SERIAL, PARALLEL dims
         for (unsigned d = 0; d < Dim; d++) {
-            domDec[d] = ippl::PARALLEL;
             hx[d]     = domain[d] / nPoints[d];
             origin[d] = 0;
         }
 
-        layout = layout_type(owned, domDec);
+        layout = layout_type(MPI_COMM_WORLD, owned, isParallel);
         mesh   = mesh_type(owned, hx, origin);
         field  = std::make_shared<field_type>(mesh, layout);
     }

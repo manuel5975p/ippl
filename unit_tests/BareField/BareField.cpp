@@ -2,19 +2,6 @@
 // Unit test BareFieldTest
 //   Test the functionality of the class BareField.
 //
-// Copyright (c) 2021 Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 #include "Ippl.h"
 
 #include <Kokkos_MathematicalConstants.hpp>
@@ -51,12 +38,10 @@ public:
         }
         auto owned = std::make_from_tuple<ippl::NDIndex<Dim>>(indices);
 
-        ippl::e_dim_tag domDec[Dim];
-        for (auto& tag : domDec) {
-            tag = ippl::PARALLEL;
-        }
+        std::array<bool, Dim> isParallel;
+        isParallel.fill(true);
 
-        layout = ippl::FieldLayout<Dim>(owned, domDec);
+        layout = ippl::FieldLayout<Dim>(MPI_COMM_WORLD, owned, isParallel);
 
         field  = std::make_shared<field_type>(layout);
         vfield = std::make_shared<vfield_type>(layout);

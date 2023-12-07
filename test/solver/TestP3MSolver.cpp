@@ -12,26 +12,13 @@
 //     Example:
 //       srun ./TestP3MSolver 16 16 16 --info 5
 //
-// Copyright (c) 2023, Sonali Mayani,
-// Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
 
 #include "Ippl.h"
 
 #include <iostream>
 
-#include "Solver/P3MSolver.h"
+#include "PoissonSolvers/P3MSolver.h"
 
 int main(int argc, char* argv[]) {
     ippl::initialize(argc, argv);
@@ -61,10 +48,8 @@ int main(int argc, char* argv[]) {
         }
 
         // specifies decomposition; here all dimensions are parallel
-        ippl::e_dim_tag decomp[dim];
-        for (unsigned int d = 0; d < dim; d++) {
-            decomp[d] = ippl::PARALLEL;
-        }
+        std::array<bool, dim> isParallel;
+        isParallel.fill(true);
 
         // unit box
         double dx       = 1.0 / nr[0];
@@ -74,7 +59,7 @@ int main(int argc, char* argv[]) {
         Vector_t origin = {-0.5, -0.5, -0.5};
 
         Mesh_t mesh(owned, hr, origin);
-        ippl::FieldLayout<dim> layout(owned, decomp);
+        ippl::FieldLayout<dim> layout(MPI_COMM_WORLD, owned, isParallel);
 
         Field_t field;
         field.initialize(mesh, layout);

@@ -2,19 +2,6 @@
 // Class HaloCells
 //   The guard / ghost cells of BareField.
 //
-// Copyright (c) 2020, Matthias Frey, Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 #ifndef IPPL_HALO_CELLS_H
 #define IPPL_HALO_CELLS_H
 
@@ -69,7 +56,7 @@ namespace ippl {
              * @param view the original field data
              * @param layout the field layout storing the domain decomposition
              */
-            void accumulateHalo(view_type& view, const Layout_t* layout);
+            void accumulateHalo(view_type& view, Layout_t* layout);
 
             /*!
              * Send interal data to halo cells. This operation uses
@@ -77,7 +64,7 @@ namespace ippl {
              * @param view the original field data
              * @param layout the field layout storing the domain decomposition
              */
-            void fillHalo(view_type&, const Layout_t* layout);
+            void fillHalo(view_type&, Layout_t* layout);
 
             /*!
              * Pack the field data to be sent into a contiguous array.
@@ -141,7 +128,7 @@ namespace ippl {
              * unpack function call
              */
             template <class Op>
-            void exchangeBoundaries(view_type& view, const Layout_t* layout, SendOrder order);
+            void exchangeBoundaries(view_type& view, Layout_t* layout, SendOrder order);
 
             /*!
              * Extract the subview of the original data. This does not copy.

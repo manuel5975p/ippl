@@ -9,19 +9,6 @@
 //// Usage:
 ////   srun ./TestCurl N 0 --info 10
 ////
-//// Copyright (c) 2022, Sonali Mayani,
-//// Paul Scherrer Institut, Villigen, Switzerland
-//// All rights reserved
-////
-//// This file is part of IPPL.
-////
-//// IPPL is free software: you can redistribute it and/or modify
-//// it under the terms of the GNU General Public License as published by
-//// the Free Software Foundation, either version 3 of the License, or
-//// (at your option) any later version.
-////
-//// You should have received a copy of the GNU General Public License
-//// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 ////
 //
 
@@ -52,12 +39,12 @@ int main(int argc, char* argv[]) {
         ippl::Index I(pt);
         ippl::NDIndex<dim> owned(I, I, I);
 
-        ippl::e_dim_tag decomp[dim];  // Specifies SERIAL, PARALLEL dims
-        for (unsigned int d = 0; d < dim; d++)
-            decomp[d] = ippl::PARALLEL;
+        // Specifies SERIAL, PARALLEL dims
+        std::array<bool, dim> isParallel;
+        isParallel.fill(true);
 
         // all parallel layout, standard domain, normal axis order
-        ippl::FieldLayout<dim> layout(owned, decomp);
+        ippl::FieldLayout<dim> layout(MPI_COMM_WORLD, owned, isParallel);
 
         // domain [0,1]^3
         double dx                      = 1.0 / double(pt);
@@ -142,8 +129,7 @@ int main(int argc, char* argv[]) {
                 },
                 Kokkos::Sum<double>(temp));
             double globaltemp = 0.0;
-            MPI_Allreduce(&temp, &globaltemp, 1, MPI_DOUBLE, MPI_SUM,
-                          ippl::Comm->getCommunicator());
+            ippl::Comm->allreduce(temp, globaltemp, 1, std::plus<double>());
             double errorNr = std::sqrt(globaltemp);
 
             temp       = 0.0;
@@ -159,8 +145,7 @@ int main(int argc, char* argv[]) {
                     valL += myVal;
                 },
                 Kokkos::Sum<double>(temp));
-            MPI_Allreduce(&temp, &globaltemp, 1, MPI_DOUBLE, MPI_SUM,
-                          ippl::Comm->getCommunicator());
+            ippl::Comm->allreduce(temp, globaltemp, 1, std::plus<double>());
             double errorDr = std::sqrt(globaltemp);
 
             errE[gd] = errorNr / errorDr;

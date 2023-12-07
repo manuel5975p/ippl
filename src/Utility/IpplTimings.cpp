@@ -21,19 +21,6 @@
 //    4) print out the results:
 //       IpplTimings::print();
 //
-// Copyright (c) 2020, Paul Scherrer Institut, Villigen PSI, Switzerland
-// All rights reserved
-//
-// This file is part of IPPL.
-//
-// IPPL is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// You should have received a copy of the GNU General Public License
-// along with IPPL. If not, see <https://www.gnu.org/licenses/>.
-//
 
 #include "Ippl.h"
 
@@ -117,8 +104,7 @@ void Timing::print() {
     {
         TimerInfo* tptr  = TimerList[0].get();
         double walltotal = 0.0;
-        MPI_Reduce(&tptr->wallTime, &walltotal, 1, MPI_DOUBLE, MPI_MAX, 0,
-                   ippl::Comm->getCommunicator());
+        ippl::Comm->reduce(tptr->wallTime, walltotal, 1, std::greater<double>());
         size_t lengthName = std::min(tptr->name.length(), 19lu);
         msg << tptr->name.substr(0, lengthName) << std::string().assign(20 - lengthName, '.')
             << " Wall tot = " << std::setw(10) << walltotal << "\n"
@@ -129,12 +115,9 @@ void Timing::print() {
         TimerInfo* tptr = TimerList[i].get();
         double wallmax = 0.0, wallmin = 0.0;
         double wallavg = 0.0;
-        MPI_Reduce(&tptr->wallTime, &wallmax, 1, MPI_DOUBLE, MPI_MAX, 0,
-                   ippl::Comm->getCommunicator());
-        MPI_Reduce(&tptr->wallTime, &wallmin, 1, MPI_DOUBLE, MPI_MIN, 0,
-                   ippl::Comm->getCommunicator());
-        MPI_Reduce(&tptr->wallTime, &wallavg, 1, MPI_DOUBLE, MPI_SUM, 0,
-                   ippl::Comm->getCommunicator());
+        ippl::Comm->reduce(tptr->wallTime, wallmax, 1, std::greater<double>());
+        ippl::Comm->reduce(tptr->wallTime, wallmin, 1, std::less<double>());
+        ippl::Comm->reduce(tptr->wallTime, wallavg, 1, std::plus<double>());
         size_t lengthName = std::min(tptr->name.length(), 19lu);
 
         msg << tptr->name.substr(0, lengthName) << std::string().assign(20 - lengthName, '.')
@@ -173,8 +156,7 @@ void Timing::print(const std::string& fn, const std::map<std::string, unsigned i
     {
         TimerInfo* tptr  = TimerList[0].get();
         double walltotal = 0.0;
-        MPI_Reduce(&tptr->wallTime, &walltotal, 1, MPI_DOUBLE, MPI_MAX, 0,
-                   ippl::Comm->getCommunicator());
+        ippl::Comm->reduce(tptr->wallTime, walltotal, 1, std::greater<double>());
         size_t lengthName = std::min(tptr->name.length(), 19lu);
         *msg << tptr->name.substr(0, lengthName);
         for (int j = lengthName; j < 20; ++j) {
@@ -192,12 +174,9 @@ void Timing::print(const std::string& fn, const std::map<std::string, unsigned i
         TimerInfo* tptr = TimerList[i].get();
         double wallmax = 0.0, wallmin = 0.0;
         double wallavg = 0.0;
-        MPI_Reduce(&tptr->wallTime, &wallmax, 1, MPI_DOUBLE, MPI_MAX, 0,
-                   ippl::Comm->getCommunicator());
-        MPI_Reduce(&tptr->wallTime, &wallmin, 1, MPI_DOUBLE, MPI_MIN, 0,
-                   ippl::Comm->getCommunicator());
-        MPI_Reduce(&tptr->wallTime, &wallavg, 1, MPI_DOUBLE, MPI_SUM, 0,
-                   ippl::Comm->getCommunicator());
+        ippl::Comm->reduce(tptr->wallTime, wallmax, 1, std::greater<double>());
+        ippl::Comm->reduce(tptr->wallTime, wallmin, 1, std::less<double>());
+        ippl::Comm->reduce(tptr->wallTime, wallavg, 1, std::plus<double>());
         size_t lengthName = std::min(tptr->name.length(), 19lu);
         *msg << tptr->name.substr(0, lengthName);
         for (int j = lengthName; j < 20; ++j) {
