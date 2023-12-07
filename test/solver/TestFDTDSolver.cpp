@@ -198,34 +198,10 @@ int main(int argc, char* argv[]) {
         bool seed = false;
 
         // define an FDTDSolver object
-        typename VField_t::BConds_t vector_bcs;
-        typename Field_t::BConds_t scalar_bcs;
-        ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, dt, seed);
+        
+        ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, ippl::FDTDBoundaryCondition::ABC_FALLAHI, dt, seed);
 
-        auto bcsetter_single = [&scalar_bcs, &vector_bcs, hr, dt, periodic]<size_t Idx>(const std::index_sequence<Idx>&){
-            if(periodic){
-                //std::cout << "Setting piriodic\n";
-                vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<VField_t>>(Idx);
-                scalar_bcs[Idx] = std::make_shared<ippl::PeriodicFace<Field_t>>(Idx);
-            }
-            else{
-                vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<VField_t>>(Idx);
-                scalar_bcs[Idx] = std::make_shared<ippl::NoBcFace<Field_t>>(Idx);
-            }
-            return 0;
-        };
-        auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
-            int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
-            (void) x;
-        };
-        bcsetter(std::make_index_sequence<Dim * 2>{});
-        solver.aN_m  .setFieldBC(vector_bcs);
-        solver.aNp1_m.setFieldBC(vector_bcs);
-        solver.aNm1_m.setFieldBC(vector_bcs);
 
-        solver.phiN_m  .setFieldBC(scalar_bcs);
-        solver.phiNm1_m.setFieldBC(scalar_bcs);
-        solver.phiNp1_m.setFieldBC(scalar_bcs);
         solver.phiN_m = 0;
         solver.phiNm1_m = 0;
         if (!seed) {
@@ -251,6 +227,9 @@ int main(int argc, char* argv[]) {
                     //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
                     view_A  (i, j, k)[1] = 0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
                     view_Am1(i, j, k)[1] = 0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+
+                    (void)x;(void)y;(void)z;
+                    (void)ig;(void)jg;(void)kg; //Suppress warnings lol
             });
         }
 

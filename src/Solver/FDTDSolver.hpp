@@ -163,7 +163,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t& charge, VField_t& current, VField_t& E,
-                                               VField_t& B, double timestep, bool seed_) {
+                                               VField_t& B, FDTDBoundaryCondition bcond, double timestep, bool seed_) : bconds_m(bcond) {
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = &charge;
@@ -179,8 +179,44 @@ namespace ippl {
         // set the seed flag
         this->seed = seed_;
 
+
+        //Set boundary conditions based on @bcond argument
+        typename VField_t::BConds_t vector_bcs;
+        typename Field_t::BConds_t scalar_bcs;
+
+        
+
+
         // call the initialization function
         initialize();
+
+        using scalar = Tfields;
+        auto hr = this->hr_m; 
+        scalar dt = this->dt;
+        auto bcsetter_single = [&scalar_bcs, &vector_bcs, hr, dt, bcond]<size_t Idx>(const std::index_sequence<Idx>&){
+            if(bcond == FDTDBoundaryCondition::PERIODIC){
+                //std::cout << "Setting piriodic\n";
+                vector_bcs[Idx] = std::make_shared<ippl::PeriodicFace<VField_t>>(Idx);
+                scalar_bcs[Idx] = std::make_shared<ippl::PeriodicFace<Field_t>>(Idx);
+            }
+            else{
+                vector_bcs[Idx] = std::make_shared<ippl::NoBcFace<VField_t>>(Idx);
+                scalar_bcs[Idx] = std::make_shared<ippl::NoBcFace<Field_t>>(Idx);
+            }
+            return 0;
+        };
+        auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
+            int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
+            (void) x;
+        };
+        bcsetter(std::make_index_sequence<Dim * 2>{});
+        aN_m  .setFieldBC(vector_bcs);
+        aNp1_m.setFieldBC(vector_bcs);
+        aNm1_m.setFieldBC(vector_bcs);
+
+        phiN_m  .setFieldBC(scalar_bcs);
+        phiNm1_m.setFieldBC(scalar_bcs);
+        phiNp1_m.setFieldBC(scalar_bcs);
     }
 
     template <typename Tfields, unsigned Dim, class M, class C>
@@ -191,8 +227,9 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     void FDTDSolver<Tfields, Dim, M, C>::solve() {
+        
         // physical constant
-        //using scalar;// = typename Tfields::BareField_t::value_type::
+        using scalar = Tfields;
 
         constexpr double c        = 1.0;  // 299792458.0;
         constexpr double mu0      = 1.0;  // 1.25663706212e-6;
@@ -208,13 +245,13 @@ namespace ippl {
         double a8 = std::pow(c * dt, 2);
 
         // 1st order absorbing boundary conditions constants
-        double beta0[3] = {(c * dt - hr_m[0]) / (c * dt + hr_m[0]),
-                           (c * dt - hr_m[1]) / (c * dt + hr_m[1]),
-                           (c * dt - hr_m[2]) / (c * dt + hr_m[2])};
-        double beta1[3] = {2.0 * hr_m[0] / (c * dt + hr_m[0]),
-                           2.0 * hr_m[1] / (c * dt + hr_m[1]),
-                           2.0 * hr_m[2] / (c * dt + hr_m[2])};
-        double beta2[3] = {-1.0, -1.0, -1.0};
+        //double beta0[3] = {(c * dt - hr_m[0]) / (c * dt + hr_m[0]),
+        //                   (c * dt - hr_m[1]) / (c * dt + hr_m[1]),
+        //                   (c * dt - hr_m[2]) / (c * dt + hr_m[2])};
+        //double beta1[3] = {2.0 * hr_m[0] / (c * dt + hr_m[0]),
+        //                   2.0 * hr_m[1] / (c * dt + hr_m[1]),
+        //                   2.0 * hr_m[2] / (c * dt + hr_m[2])};
+        //double beta2[3] = {-1.0, -1.0, -1.0};
 
         // preliminaries for Kokkos loops (ghost cells and views)
         phiNp1_m = 0.0;
@@ -233,10 +270,15 @@ namespace ippl {
         const int nghost_phi = phiN_m.getNghost();
         const int nghost_a   = aN_m.getNghost();
         const auto& ldom     = layout_mp->getLocalNDIndex();
+
+
+        //Apply Boundary conditions, this will only do something in case of periodic
         aN_m.getFieldBC().apply(aN_m);
         aNm1_m.getFieldBC().apply(aNm1_m);
         phiN_m.getFieldBC().apply(phiN_m);
         phiNm1_m.getFieldBC().apply(phiNm1_m);
+
+
         Kokkos::fence();
         // compute scalar potential and vector potential at next time-step
         // first, only the interior points are updated
@@ -284,139 +326,19 @@ namespace ippl {
                 });
         }
 
-        // interior points need to have been updated before TF/SF seed and ABCs
-        Kokkos::fence();
-
-        // add seed field via TF/SF boundaries
-        if (false && seed) {
-            iteration++;
-
-            // the scattered field boundary is the 2nd point after the boundary
-            // the total field boundary is the 3rd point after the boundary
-            for (size_t gd = 0; gd < 1; ++gd) {
-                Kokkos::parallel_for(
-                    "Vector potential update", ippl::getRangePolicy(view_aN, nghost_a),
-                    KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
-                        // global indices
-                        const int ig = i + ldom[0].first() - nghost_a;
-                        const int jg = j + ldom[1].first() - nghost_a;
-                        const int kg = k + ldom[2].first() - nghost_a;
-
-                        // SF boundary in all 3 dimensions
-                        bool isXmin_SF = ((ig == 1) && (jg > 1) && (kg > 1) && (jg < nr_m[1] - 2)
-                                          && (kg < nr_m[2] - 2));
-                        double xmin_SF = a2 * gaussian(iteration, i, j, k);
-                        bool isYmin_SF = ((ig > 1) && (jg == 1) && (kg > 1) && (ig < nr_m[0] - 2)
-                                          && (kg < nr_m[2] - 2));
-                        double ymin_SF = a4 * gaussian(iteration, i, j, k);
-                        bool isZmin_SF = ((ig > 1) && (jg > 1) && (kg == 1) && (ig < nr_m[0] - 2)
-                                          && (jg < nr_m[1] - 2));
-                        double zmin_SF = a6 * gaussian(iteration, i, j, k);
-                        bool isXmax_SF = ((ig == nr_m[0] - 2) && (jg > 1) && (kg > 1)
-                                          && (jg < nr_m[1] - 2) && (kg < nr_m[2] - 2));
-                        double xmax_SF = -a2 * gaussian(iteration, i, j, k);
-                        bool isYmax_SF = ((ig > 1) && (jg == nr_m[1] - 2) && (kg > 1)
-                                          && (ig < nr_m[0] - 2) && (kg < nr_m[2] - 2));
-                        double ymax_SF = -a4 * gaussian(iteration, i, j, k);
-                        bool isZmax_SF = ((ig > 1) && (jg > 1) && (kg == nr_m[2] - 2)
-                                          && (ig < nr_m[0] - 2) && (jg < nr_m[1] - 2));
-                        double zmax_SF = -a6 * gaussian(iteration, i, j, k);
-
-                        // TF boundary
-                        bool isXmin_TF = ((ig == 2) && (jg > 2) && (kg > 2) && (jg < nr_m[1] - 3)
-                                          && (kg < nr_m[2] - 3));
-                        double xmin_TF = -a2 * gaussian(iteration, i, j, k);
-                        bool isYmin_TF = ((ig > 2) && (jg == 2) && (kg > 2) && (ig < nr_m[0] - 3)
-                                          && (kg < nr_m[2] - 3));
-                        double ymin_TF = -a4 * gaussian(iteration, i, j, k);
-                        bool isZmin_TF = ((ig > 2) && (jg > 2) && (kg == 2) && (ig < nr_m[0] - 3)
-                                          && (jg < nr_m[1] - 3));
-                        double zmin_TF = -a6 * gaussian(iteration, i, j, k);
-                        bool isXmax_TF = ((ig == nr_m[0] - 3) && (jg > 2) && (kg > 2)
-                                          && (jg < nr_m[1] - 3) && (kg < nr_m[2] - 3));
-                        double xmax_TF = a2 * gaussian(iteration, i, j, k);
-                        bool isYmax_TF = ((ig > 2) && (jg == nr_m[1] - 3) && (kg > 2)
-                                          && (ig < nr_m[0] - 3) && (kg < nr_m[2] - 3));
-                        double ymax_TF = a4 * gaussian(iteration, i, j, k);
-                        bool isZmax_TF = ((ig > 2) && (jg > 2) && (kg == nr_m[2] - 3)
-                                          && (ig < nr_m[0] - 3) && (jg < nr_m[1] - 3));
-                        double zmax_TF = a6 * gaussian(iteration, i, j, k);
-                        //isXmax_SF = false;
-                        //isXmax_TF = false;
-                        //isXmin_SF = false;
-                        //isYmin_TF = false;
-                        //isYmax_SF = false;
-                        //isYmax_TF = false;
-                        //isYmin_SF = false;
-                        //isXmin_TF = false;
-                        //isZmax_SF = false;
-                        //isZmax_TF = false;
-                        //isZmin_SF = false;
-                        //isZmin_TF = false;
-                        // update field (add seed)
-                        view_aNp1(i, j, k)[gd] +=
-                            isXmin_SF * xmin_SF + isYmin_SF * ymin_SF + isZmin_SF * zmin_SF
-                            + isXmax_SF * xmax_SF + isYmax_SF * ymax_SF + isZmax_SF * zmax_SF
-                            + isXmin_TF * xmin_TF + isYmin_TF * ymin_TF + isZmin_TF * zmin_TF
-                            + isXmax_TF * xmax_TF + isYmax_TF * ymax_TF + isZmax_TF * zmax_TF;
-                    });
-            }
-        }
+        // interior points need to have been updated before ABCs
         Kokkos::fence();
 
         // apply 1st order Absorbing Boundary Conditions
         // for both scalar and vector potentials
-        if(phiN_m.getFieldBC()[0]->getBCType() == NO_FACE)
-        Kokkos::parallel_for(
-            "Scalar potential ABCs", ippl::getRangePolicy(view_phiN, nghost_phi),
-            KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
-                // global indices
-                const int ig = i + ldom[0].first() - nghost_phi;
-                const int jg = j + ldom[1].first() - nghost_phi;
-                const int kg = k + ldom[2].first() - nghost_phi;
-
-                // boundary values: 1st order Absorbing Boundary Conditions
-                bool isXmin =
-                    ((ig == 0) && (jg > 0) && (kg > 0) && (jg < nr_m[1] - 1) && (kg < nr_m[2] - 1));
-                double xmin = beta0[0] * (view_phiNm1(i, j, k) + view_phiNp1(i + 1, j, k))
-                              + beta1[0] * (view_phiN(i, j, k) + view_phiN(i + 1, j, k))
-                              + beta2[0] * (view_phiNm1(i + 1, j, k));
-                bool isYmin =
-                    ((ig > 0) && (jg == 0) && (kg > 0) && (ig < nr_m[0] - 1) && (kg < nr_m[2] - 1));
-                double ymin = beta0[1] * (view_phiNm1(i, j, k) + view_phiNp1(i, j + 1, k))
-                              + beta1[1] * (view_phiN(i, j, k) + view_phiN(i, j + 1, k))
-                              + beta2[1] * (view_phiNm1(i, j + 1, k));
-                bool isZmin =
-                    ((ig > 0) && (jg > 0) && (kg == 0) && (ig < nr_m[0] - 1) && (jg < nr_m[1] - 1));
-                double zmin = beta0[2] * (view_phiNm1(i, j, k) + view_phiNp1(i, j, k + 1))
-                              + beta1[2] * (view_phiN(i, j, k) + view_phiN(i, j, k + 1))
-                              + beta2[2] * (view_phiNm1(i, j, k + 1));
-                bool isXmax = ((ig == nr_m[0] - 1) && (jg > 0) && (kg > 0) && (jg < nr_m[1] - 1)
-                               && (kg < nr_m[2] - 1));
-                double xmax = beta0[0] * (view_phiNm1(i, j, k) + view_phiNp1(i - 1, j, k))
-                              + beta1[0] * (view_phiN(i, j, k) + view_phiN(i - 1, j, k))
-                              + beta2[0] * (view_phiNm1(i - 1, j, k));
-                bool isYmax = ((ig > 0) && (jg == nr_m[1] - 1) && (kg > 0) && (ig < nr_m[0] - 1)
-                               && (kg < nr_m[2] - 1));
-                double ymax = beta0[1] * (view_phiNm1(i, j, k) + view_phiNp1(i, j - 1, k))
-                              + beta1[1] * (view_phiN(i, j, k) + view_phiN(i, j - 1, k))
-                              + beta2[1] * (view_phiNm1(i, j - 1, k));
-                bool isZmax = ((ig > 0) && (jg > 0) && (kg == nr_m[2] - 1) && (ig < nr_m[0] - 1)
-                               && (jg < nr_m[1] - 1));
-                double zmax = beta0[2] * (view_phiNm1(i, j, k) + view_phiNp1(i, j, k - 1))
-                              + beta1[2] * (view_phiN(i, j, k) + view_phiN(i, j, k - 1))
-                              + beta2[2] * (view_phiNm1(i, j, k - 1));
-                bool isInterior = !(isXmin | isXmax | isYmin | isYmax | isZmin | isZmax);
-                view_phiNp1(i, j, k) = isXmin * xmin + isYmin * ymin + isZmin * zmin
-                                        + isXmax * xmax + isYmax * ymax + isZmax * zmax + isInterior * view_phiNp1(i, j, k);
-                                    
-            });
+        first_order_abc<scalar, 0, 1, 2> abc_x[] = {first_order_abc<scalar, 0, 1, 2> (hr_m, c, dt,  1), first_order_abc<scalar, 0, 1, 2>(hr_m, c, dt, -1)};
+        first_order_abc<scalar, 1, 0, 2> abc_y[] = {first_order_abc<scalar, 1, 0, 2> (hr_m, c, dt,  1), first_order_abc<scalar, 1, 0, 2>(hr_m, c, dt, -1)};
+        first_order_abc<scalar, 2, 0, 1> abc_z[] = {first_order_abc<scalar, 2, 0, 1> (hr_m, c, dt,  1), first_order_abc<scalar, 2, 0, 1>(hr_m, c, dt, -1)};
         ippl::Vector<size_t, 3> extenz = ippl::Vector<size_t, 3>{(size_t)nr_m[0] + nghost_a * 2, (size_t)nr_m[1] + nghost_a * 2, (size_t)nr_m[2] + nghost_a * 2};
         
-        if(aN_m.getFieldBC()[0]->getBCType() == NO_FACE){
-        for (size_t gd = 0; gd < Dim; ++gd) {
+        if(bconds_m == FDTDBoundaryCondition::ABC_MUR){
             Kokkos::parallel_for(
-                "Vector potential ABCs", ippl::getRangePolicy(view_aN),
+                "Scalar potential ABCs", ippl::getRangePolicy(view_phiN, 0),
                 KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
                     // global indices
                     const int ig = i + ldom[0].first();
@@ -424,23 +346,112 @@ namespace ippl {
                     const int kg = k + ldom[2].first();
                     ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
                     // boundary values: 1st order Absorbing Boundary Conditions
-                    if(+bocc[gd]){
-                        int offs = bocc[gd] == AT_MIN ? 1 : -1;
-                        if(gd == 0){
-                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
-                        }
-                        if(gd == 1){
-                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
-                        }
-                        if(gd == 2){
-                            view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
+
+                    
+                    for(unsigned _d = 0;_d < Dim;_d++){
+                        if(+bocc[_d]){
+                            int offs = bocc[_d] == AT_MIN ? 1 : -1;
+                            if(_d == 0){
+                                view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i + offs, j, k) - view_phiN(i, j, k)) * this->dt / hr_m[0];
+                            }
+                            if(_d == 1){
+                                view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j + offs, k) - view_phiN(i, j, k)) * this->dt / hr_m[1];
+                            }
+                            if(_d == 2){
+                                view_phiNp1(i, j, k) = view_phiN(i, j, k) + (view_phiN(i, j, k + offs) - view_phiN(i, j, k)) * this->dt / hr_m[2];
+                            }
                         }
                     }
-                });
+                }
+            );
+            for (size_t gd = 0; gd < Dim; ++gd) {
+                Kokkos::parallel_for(
+                    "Vector potential ABCs", ippl::getRangePolicy(view_aN, 0),
+                    KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+                        // global indices
+                        const int ig = i + ldom[0].first();
+                        const int jg = j + ldom[1].first();
+                        const int kg = k + ldom[2].first();
+                        ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
+                        for(unsigned _d = 0;_d < Dim;_d++){
+                            if(+bocc[_d]){
+                                int offs = bocc[_d] == AT_MIN ? 1 : -1;
+                                if(_d == 0){
+                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i + offs, j, k) - view_aN(i, j, k)) * this->dt / hr_m[0];
+                                }
+                                if(_d == 1){
+                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j + offs, k) - view_aN(i, j, k)) * this->dt / hr_m[1];
+                                }
+                                if(_d == 2){
+                                    view_aNp1(i, j, k) = view_aN(i, j, k) + (view_aN(i, j, k + offs) - view_aN(i, j, k)) * this->dt / hr_m[2];
+                                }
+                            }
+                        }
+                    }
+                );
+            }
         }
+
+
+
+
+        else if(bconds_m == FDTDBoundaryCondition::ABC_FALLAHI){
+            Kokkos::parallel_for(
+                "Scalar potential ABCs", ippl::getRangePolicy(view_phiN, 0),
+                KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+                    // global indices
+                    const int ig = i + ldom[0].first();
+                    const int jg = j + ldom[1].first();
+                    const int kg = k + ldom[2].first();
+                    ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
+                    // boundary values: 1st order Absorbing Boundary Conditions
+
+                    
+                    for(unsigned _d = 0;_d < Dim;_d++){
+                        if(+bocc[_d]){
+                            int offs = bocc[_d] == AT_MIN ? 1 : -1;
+                            if(_d == 0){
+                                view_phiNp1(i, j, k) = abc_x[bocc[_d] >> 1](view_phiN, view_phiNm1, view_phiNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                            }
+                            if(_d == 1){
+                                view_phiNp1(i, j, k) = abc_y[bocc[_d] >> 1](view_phiN, view_phiNm1, view_phiNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                            }
+                            if(_d == 2){
+                                view_phiNp1(i, j, k) = abc_z[bocc[_d] >> 1](view_phiN, view_phiNm1, view_phiNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                            }
+                        }
+                    }                 
+                }
+            );
+            for (size_t gd = 0; gd < Dim; ++gd) {
+                Kokkos::parallel_for(
+                    "Vector potential ABCs", ippl::getRangePolicy(view_aN, 0),
+                    KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
+                        // global indices
+                        const int ig = i + ldom[0].first();
+                        const int jg = j + ldom[1].first();
+                        const int kg = k + ldom[2].first();
+                        ippl::Vector<axis_aligned_occlusion, 3> bocc = boundary_occlusion_of(0, ippl::Vector<size_t, 3>{(size_t)ig, (size_t)jg, (size_t)kg}, extenz);
+                        for(unsigned _d = 0;_d < Dim;_d++){
+                            if(+bocc[_d]){
+                                int offs = bocc[_d] == AT_MIN ? 1 : -1;
+                                if(_d == 0){
+                                    view_aNp1(i, j, k) = abc_x[bocc[_d] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                }
+                                if(_d == 1){
+                                    view_aNp1(i, j, k) = abc_y[bocc[_d] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                }
+                                if(_d == 2){
+                                    view_aNp1(i, j, k) = abc_z[bocc[_d] >> 1](view_aN, view_aNm1, view_aNp1, ippl::Vector<size_t, 3>({i, j, k}));
+                                }
+                            }
+                        }
+                    }
+                );
+            }
         }
-        else{
-            
+        else if(bconds_m == FDTDBoundaryCondition::PERIODIC){
+            //Do nothing, as this is done by BC::apply (See above)
         }
         Kokkos::fence();
 

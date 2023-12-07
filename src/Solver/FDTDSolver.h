@@ -28,6 +28,11 @@
 #include "Meshes/UniformCartesian.h"
 
 namespace ippl {
+    enum struct FDTDBoundaryCondition{
+        ABC_MUR,
+        ABC_FALLAHI,
+        PERIODIC
+    };
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<double, Dim>,
               class C = typename M::DefaultCentering>
     class FDTDSolver {
@@ -47,7 +52,7 @@ namespace ippl {
         using buffer_type = Communicate::buffer_type<memory_space>;
 
         // constructor and destructor
-        FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B,
+        FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B, FDTDBoundaryCondition bcond = FDTDBoundaryCondition::PERIODIC,
                    double timestep = 0.05, bool seed_ = false);
         ~FDTDSolver();
 
@@ -99,6 +104,9 @@ namespace ippl {
         // E and B fields
         VField_t* En_mp;
         VField_t* Bn_mp;
+
+        FDTDBoundaryCondition bconds_m;
+
         double total_energy;
         double absorbed__energy;
         // buffer for communication
