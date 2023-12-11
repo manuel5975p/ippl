@@ -163,7 +163,7 @@ namespace ippl {
 
     template <typename Tfields, unsigned Dim, class M, class C>
     FDTDSolver<Tfields, Dim, M, C>::FDTDSolver(Field_t& charge, VField_t& current, VField_t& E,
-                                               VField_t& B, FDTDBoundaryCondition bcond, double timestep, bool seed_) : bconds_m(bcond) {
+                                               VField_t& B, size_t pcount, FDTDBoundaryCondition bcond, double timestep, bool seed_) : pcount_m(pcount), bconds_m(bcond), pl(charge.getLayout(), charge.get_mesh()), bunch(pl){
         // set the rho and J fields to be references to charge and current
         // since charge and current deposition will happen at each timestep
         rhoN_mp = &charge;
@@ -285,6 +285,8 @@ namespace ippl {
         // then, if the user has set a seed, the seed is added via TF/SF boundaries
         // (TF/SF = total-field/scattered-field technique)
         // finally, absorbing boundary conditions are imposed
+        (*rhoN_mp) = 0.0;
+        bunch.Q.scatter(*rhoN_mp, bunch.R);
         Kokkos::parallel_for(
             "Scalar potential update", ippl::getRangePolicy(view_phiN, nghost_phi),
             KOKKOS_LAMBDA(const size_t i, const size_t j, const size_t k) {
@@ -452,6 +454,56 @@ namespace ippl {
             //Do nothing, as this is done by BC::apply (See above)
         }
         Kokkos::fence();
+        bunch.E_gather.gather(*this->En_mp, bunch.R);
+        bunch.B_gather.gather(*this->Bn_mp, bunch.R);
+        Kokkos::fence();
+        constexpr scalar e_mass = 0.5110;
+        auto Qview = bunch.Q.getView();
+        auto rview = bunch.R.getView();
+        auto rnp1view = bunch.R_np1.getView();
+
+        auto E_gatherview = bunch.E_gather.getView();
+        auto B_gatherview = bunch.B_gather.getView();
+        auto gammabeta_view = bunch.gamma_beta.getView();
+
+        int trank = ippl::Comm->rank();
+        (void)trank;
+        scalar this_dt = this->dt;
+
+        Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
+            using Kokkos::sqrt;
+            scalar charge = -Qview(i);
+            const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
+            const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * this_dt * E_gatherview(i) / (2.0 * e_mass); 
+            const scalar alpha = -charge * this_dt / (scalar(2) * e_mass * sqrt(1 + dot_prod(t1, t1)));
+            ippl::Vector<scalar, 3> crossprod = alpha * ippl::cross(t1, B_gatherview(i));
+            const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
+            const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0 + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
+            const ippl::Vector<scalar, 3> ngammabeta = t3 - charge * this_dt * E_gatherview(i) / (2.0 * e_mass);
+            rnp1view(i) = rview(i) + this_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));
+            gammabeta_view(i) = ngammabeta;
+        });
+
+        this->JN_mp->operator=(0.0);
+        bunch.Q.scatter(*this->JN_mp, bunch.R, bunch.R_np1, scalar(1.0) / (dt * hr_m[0] * hr_m[1] * hr_m[2]));
+
+        Kokkos::deep_copy(bunch.R_nm1.getView(), bunch.R.getView());
+        Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
+
+        Kokkos::View<bool*> invalid("OOB Particcel", bunch.getLocalNum());
+        size_t invalid_count = 0;
+        
+        Kokkos::parallel_reduce(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(size_t i, size_t& ref){
+            bool out_of_bounds = false;
+            ippl::Vector<scalar, Dim> ppos = rview(i);
+            for(size_t i = 0;i < Dim;i++){
+                out_of_bounds |= (ppos[i] <= 0.0);
+                out_of_bounds |= (ppos[i] >= 1.0); //Check against simulation domain
+            }
+            invalid(i) = out_of_bounds;
+            ref += out_of_bounds;
+        }, invalid_count);
+        bunch.destroy(invalid, invalid_count);
 
         // evaluate E and B fields at N
         std::cout << "Energy: " << field_evaluation() << " " << this->absorbed__energy << "\n";
@@ -632,5 +684,8 @@ namespace ippl {
         aNm1_m = 0.0;
         aN_m   = 0.0;
         aNp1_m = 0.0;
+
+        bunch.create(pcount_m);
+        bunch.Q = 0.3;
     };
 }  // namespace ippl
