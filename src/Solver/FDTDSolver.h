@@ -27,8 +27,10 @@
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
 
+
+
 template <typename _scalar, class PLayout>
-struct Bunch : public ippl::ParticleBase<PLayout> {
+struct  Bunch : public ippl::ParticleBase<PLayout> {
     using scalar = _scalar;
 
     // Constructor for the Bunch class, taking a PLayout reference
@@ -39,7 +41,9 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
         this->addAttribute(mass);       // Mass attribute
         this->addAttribute(gamma_beta); // Gamma-beta attribute (product of relativistiv gamma and beta)
         this->addAttribute(R_np1);      // Position attribute for the next time step
+        this->addAttribute(R_np12);      // Position attribute for the next time step
         this->addAttribute(R_nm1);      // Position attribute for the next time step
+        this->addAttribute(R_nm12);      // Position attribute for the next time step
         this->addAttribute(E_gather);   // Electric field attribute for particle gathering
         this->addAttribute(B_gather);   // Magnetic field attribute for particle gathering
     }
@@ -58,19 +62,60 @@ struct Bunch : public ippl::ParticleBase<PLayout> {
     charge_container_type mass;       // Mass container
     velocity_container_type gamma_beta; // Gamma-beta container
     typename ippl::ParticleBase<PLayout>::particle_position_type R_np1; // Position container for the next time step
+    typename ippl::ParticleBase<PLayout>::particle_position_type R_np12; // Position container half a timestep in the future, only temporarily correct
     typename ippl::ParticleBase<PLayout>::particle_position_type R_nm1; // Position container for the previous time step
+    typename ippl::ParticleBase<PLayout>::particle_position_type R_nm12; // Position container half a timestep in the past, only temporarily correct
     vector_container_type E_gather;   // Electric field container for particle gathering
     vector_container_type B_gather;   // Magnetic field container for particle gathering
 
 };
+template <typename _scalar, class PLayout>
+struct TracerBunch : public ippl::ParticleBase<PLayout> {
+    using scalar = _scalar;
+
+    // Constructor for the Bunch class, taking a PLayout reference
+    TracerBunch(PLayout& playout)
+        : ippl::ParticleBase<PLayout>(playout) {
+        // Add attributes to the particle bunch
+        //this->addAttribute(Q);          // Charge attribute
+        //this->addAttribute(mass);       // Mass attribute
+        //this->addAttribute(gamma_beta); // Gamma-beta attribute (product of relativistiv gamma and beta)
+        //this->addAttribute(R_np1);      // Position attribute for the next time step
+        this->addAttribute(E_gather);   // Electric field attribute for particle gathering
+        this->addAttribute(B_gather);   // Magnetic field attribute for particle gathering
+        this->addAttribute(outward_normal);   // Magnetic field attribute for particle gathering
+    }
+
+    // Destructor for the Bunch class
+    ~TracerBunch() {}
+
+    using vector_container_type   = ippl::ParticleAttrib<ippl::Vector<scalar, 3>>;
+
+    vector_container_type E_gather;      // Electric field container for particle gathering
+    vector_container_type B_gather;      // Magnetic field container for particle gathering
+    vector_container_type outward_normal;// Outward normals for particle gathering
+};
 template<typename _scalar, class PLayout>
 _scalar bunch_energy(const Bunch<_scalar, PLayout>& bantsch);
+template<typename bunch_type>
+concept bunch_updater = requires(bunch_type t){
+    {sizeof(bunch_type) >= 1};
+};
 namespace ippl {
     enum struct FDTDBoundaryCondition{
         ABC_MUR,
         ABC_FALLAHI,
         PERIODIC
     };
+
+    //TODO: Maybe switch to std::function
+    enum struct FDTDParticleUpdateRule{
+        LORENTZ, CIRCULAR_ORBIT, DIPOLE_ORBIT, STATIONARY
+    };
+    enum struct FDTDFieldUpdateRule{
+        DONT, DO
+    };
+
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<double, Dim>,
               class C = typename M::DefaultCentering>
     class FDTDSolver {
@@ -91,7 +136,7 @@ namespace ippl {
 
         // constructor and destructor
         FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B, size_t pcount, FDTDBoundaryCondition bcond = FDTDBoundaryCondition::PERIODIC,
-                   double timestep = 0.05, bool seed_ = false);
+                   FDTDParticleUpdateRule pur = FDTDParticleUpdateRule::LORENTZ, FDTDFieldUpdateRule fur = FDTDFieldUpdateRule::DO, double timestep = 0.05, bool seed_ = false,  VField_t* radiation = nullptr);
         ~FDTDSolver();
 
         // finite differences time domain solver for potentials (A and phi)
@@ -99,6 +144,9 @@ namespace ippl {
 
         // evaluates E and B fields using computed potentials
         double field_evaluation();
+
+        template<typename callable>
+        void fill_initialcondition(callable c);
 
         // gaussian pulse
         double gaussian(size_t it, size_t i, size_t j, size_t k)const noexcept;
@@ -142,15 +190,19 @@ namespace ippl {
         // E and B fields
         VField_t* En_mp;
         VField_t* Bn_mp;
+        VField_t* radiation_mp;
 
         FDTDBoundaryCondition bconds_m;
-
+        FDTDParticleUpdateRule particle_update_m;
+        FDTDFieldUpdateRule field_update_m;
         using playout_type = ippl::ParticleSpatialLayout<Tfields, 3>;
         using bunch_type = ::Bunch<Tfields, playout_type>;
+        using tracer_bunch_type = ::TracerBunch<Tfields, playout_type>;
 
         size_t pcount_m;
         playout_type pl;
         bunch_type bunch;
+        tracer_bunch_type tracer_bunch;
         double total_energy;
         double absorbed__energy;
         // buffer for communication
