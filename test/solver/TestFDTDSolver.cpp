@@ -72,9 +72,9 @@ void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<doub
     vtkout << "CELL_DATA " << (nx + 2) * (ny + 2) * (nz + 2) << endl;
 
     vtkout << "VECTORS E-Field float" << endl;
-    for (int z = 0; z < nz + 2; z++) {
+    for (int x = 0; x < nx + 2; x++) {
         for (int y = 0; y < ny + 2; y++) {
-            for (int x = 0; x < nx + 2; x++) {
+            for (int z = 0; z < nz + 2; z++) {
                 vtkout << host_view(x, y, z)[0] << "\t" << host_view(x, y, z)[1] << "\t"
                        << host_view(x, y, z)[2] << endl;
             }
@@ -156,18 +156,22 @@ int main(int argc, char* argv[]) {
 
         // unit box
         bool periodic = false;
-        double dx                        = 1.0 / nr[0];
-        double dy                        = 1.0 / nr[1];
-        double dz                        = 1.0 / nr[2];
-        ippl::Vector<double, Dim> hr     = {dx, dy, dz};
-        ippl::Vector<double, Dim> origin = {0.0, 0.0, 0.0};
+
+        //TODO: Put this in everywhere
+        using scalar = double;
+        scalar dx                        = 1.0 / nr[0];
+        scalar dy                        = 1.0 / nr[1];
+        scalar dz                        = 1.0 / nr[2];
+
+        ippl::Vector<scalar, Dim> hr     = {dx, dy, dz};
+        ippl::Vector<scalar, Dim> origin = {0.0, 0.0, 0.0};
         Mesh_t mesh(owned, hr, origin);
 
         // CFL condition lambda = c*dt/h < 1/sqrt(d) = 0.57 for d = 3
         // we set a more conservative limit by choosing lambda = 0.5
         // we take h = minimum(dx, dy, dz)
-        const double c = 1.0;  // 299792458.0;
-        double dt      = std::min({dx, dy, dz}) * 0.5 / c;
+        const scalar c = 1.0;  // 299792458.0;
+        scalar dt      = std::min({dx, dy, dz}) * 0.5 / c;
 
         // all parallel layout, standard domain, normal axis order
         std::array<bool, Dim> isParallel;
@@ -202,8 +206,24 @@ int main(int argc, char* argv[]) {
 
         // define an FDTDSolver object
         
-        ippl::FDTDSolver<double, Dim> solver(rho, current, fieldE, fieldB, ippl::FDTDBoundaryCondition::ABC_FALLAHI, dt, seed);
-
+        using s_t = ippl::FDTDSolver<double, Dim>; 
+        s_t solver(rho, current, fieldE, fieldB, 1, ippl::FDTDBoundaryCondition::ABC_FALLAHI, dt, seed);
+        auto srview = solver.bunch.R.getView();
+        auto gbrview = solver.bunch.gamma_beta.getView();
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
+            //generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+            //    solver.bunch.R.getView(),
+            //    solver.bunch.gamma_beta.getView(),
+            //    regions_view(rink),
+            //    rand_pool
+            //)
+            KOKKOS_LAMBDA(size_t idx){
+                srview(idx) = ippl::Vector<scalar, Dim>{0.5, 0.5, 0.5};
+                gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 1.5, 0.0};
+                
+            }
+        );
 
         solver.phiN_m = 0;
         solver.phiNm1_m = 0;
@@ -228,8 +248,8 @@ int main(int argc, char* argv[]) {
                     double z = (kg + 0.5) * hr[2] + origin[2];
 
                     //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                    view_A  (i, j, k)[1] = -0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
-                    view_Am1(i, j, k)[1] = -0.2 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_A  (i, j, k)[1] = 0.0 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_Am1(i, j, k)[1] = 0.0 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
 
                     (void)x;(void)y;(void)z;
                     (void)ig;(void)jg;(void)kg; //Suppress warnings lol
@@ -268,7 +288,7 @@ int main(int argc, char* argv[]) {
 
             solver.solve();
 
-            dumpVTK(solver.aN_m, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+            dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
         }
     }
     ippl::finalize();
