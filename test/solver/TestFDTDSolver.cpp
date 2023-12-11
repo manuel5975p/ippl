@@ -30,18 +30,59 @@
 
 #include "Ippl.h"
 
+#include <Kokkos_Macros.hpp>
 #include <cstdlib>
 
 #include "Utility/IpplException.h"
 #include "Utility/IpplTimings.h"
-
+#include <Kokkos_Random.hpp>
 #include "Solver/FDTDSolver.h"
 //#include "Solver/BoundaryDispatch.h"
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
     return 100 * std::sin(n * dt);
 }
+template <typename T, class GeneratorPool, unsigned Dim>
+struct generate_random {
+    using view_type  = typename ippl::detail::ViewType<T, 1>::view_type;
+    using value_type = typename T::value_type;
+    // Output View for the random numbers
+    view_type Rview, Rn1view, GBview;
+    ippl::NDRegion<value_type, Dim> inside;
+    // The GeneratorPool
+    GeneratorPool rand_pool;
 
+    // Initialize all members
+    generate_random(view_type x_,view_type xn1_, view_type v_, ippl::NDRegion<value_type, Dim> reg, GeneratorPool rand_pool_)
+        :Rview(x_)
+        ,Rn1view(xn1_)
+        ,GBview(v_)
+        ,inside(reg)
+        ,rand_pool(rand_pool_){}
+
+    KOKKOS_INLINE_FUNCTION void operator()(const size_t i) const {
+        // Get a random number state from the pool for the active thread
+        typename GeneratorPool::generator_type rand_gen = rand_pool.get_state();
+
+        //value_type u;
+        for (unsigned d = 0; d < Dim; ++d) {
+            typename T::value_type w = inside[d].max() - inside[d].min();
+            if(d == 0){
+                Rview (i)[d] = rand_gen.normal(inside[d].min() + 0.8 * w, 0.03 * w);
+                Rn1view (i)[d] = rand_gen.normal(inside[d].min() + 0.8 * w, 0.03 * w);
+            }
+            else{
+                Rview (i)[d] = rand_gen.normal(inside[d].min() + 0.5 * w, 0.03 * w);
+                Rn1view (i)[d] = rand_gen.normal(inside[d].min() + 0.5 * w, 0.03 * w);
+            }
+            GBview(i)[d] = 0; //Irrelefant
+        }
+        GBview(i)[1] = 1;
+        
+        // Give the state back, which will allow another thread to acquire it
+        rand_pool.free_state(rand_gen);
+    }
+};
 void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
                          ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
              int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
@@ -58,7 +99,7 @@ void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<doub
     Kokkos::deep_copy(host_view, E.getView());
 
     Inform vtkout(NULL, fname.str().c_str(), Inform::OVERWRITE);
-    vtkout.precision(10);
+    vtkout.precision(7);
     vtkout.setf(std::ios::scientific, std::ios::floatfield);
 
     // start with header
@@ -149,13 +190,13 @@ int main(int argc, char* argv[]) {
 
         // specifies decomposition; here all dimensions are parallel
 
-        ippl::e_cube_tag decomp[Dim];
-        for (unsigned int d = 0; d < Dim; d++) {
-            decomp[d] = ippl::IS_PARALLEL;
-        }
+        //ippl::e_cube_tag decomp[Dim];
+        //for (unsigned int d = 0; d < Dim; d++) {
+        //    decomp[d] = ippl::IS_PARALLEL;
+        //}
 
         // unit box
-        bool periodic = false;
+        //bool periodic = false;
 
         //TODO: Put this in everywhere
         using scalar = double;
@@ -190,11 +231,13 @@ int main(int argc, char* argv[]) {
         //    
         //});
         // define the Vector field E (LHS)
-        VField_t fieldE, fieldB;
+        VField_t fieldE, fieldB, radiation;
         fieldE.initialize(mesh, layout);
         fieldB.initialize(mesh, layout);
+        radiation.initialize(mesh, layout);
         fieldE = 0.0;
         fieldB = 0.0;
+        radiation = 0.0;
 
         // define current = 0
         VField_t current;
@@ -207,27 +250,38 @@ int main(int argc, char* argv[]) {
         // define an FDTDSolver object
         
         using s_t = ippl::FDTDSolver<double, Dim>; 
-        s_t solver(rho, current, fieldE, fieldB, 1, ippl::FDTDBoundaryCondition::ABC_FALLAHI, dt, seed);
+        s_t solver(rho, current, fieldE, fieldB, 1000, ippl::FDTDBoundaryCondition::ABC_FALLAHI, ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT, ippl::FDTDFieldUpdateRule::DO, dt, seed, &radiation);
         auto srview = solver.bunch.R.getView();
+        auto srn1view = solver.bunch.R_nm1.getView();
         auto gbrview = solver.bunch.gamma_beta.getView();
+        Kokkos::Random_XorShift64_Pool<> rand_pool((size_t)(42312 + 100 * ippl::Comm->rank()));
+        typename s_t::playout_type::RegionLayout_t const& rlayout = solver.pl.getRegionLayout();
+        typename s_t::playout_type::RegionLayout_t::view_type::host_mirror_type regions_view = rlayout.gethLocalRegions();
+        
         Kokkos::parallel_for(
             Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
-            //generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-            //    solver.bunch.R.getView(),
-            //    solver.bunch.gamma_beta.getView(),
-            //    regions_view(rink),
-            //    rand_pool
-            //)
-            KOKKOS_LAMBDA(size_t idx){
-                srview(idx) = ippl::Vector<scalar, Dim>{0.5, 0.5, 0.5};
-                gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 1.5, 0.0};
-                
-            }
+            generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                solver.bunch.R.getView(),
+                solver.bunch.R_nm1.getView(),
+                solver.bunch.gamma_beta.getView(),
+                regions_view(ippl::Comm->rank()),
+                rand_pool
+            )
+            //KOKKOS_LAMBDA(size_t idx){
+            //    srview(idx) = ippl::Vector<scalar, Dim>{0.8, 0.5, 0.5};
+            //    srn1view(idx) = ippl::Vector<scalar, Dim>{0.8, 0.5, 0.5};
+            //    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
+            //    
+            //}
         );
 
         solver.phiN_m = 0;
         solver.phiNm1_m = 0;
-        if (!seed) {
+        solver.fill_initialcondition(KOKKOS_LAMBDA(scalar x, scalar y, scalar z){
+            (void)x;(void)y;(void)z;
+            return ippl::Vector<scalar, Dim>{0, x * 0.0f, 0};
+        });
+        if (!seed && false) {
             // add pulse at center of domain
             auto view_rho    = rho.getView();
             auto view_A      = solver.aN_m.getView();
@@ -287,8 +341,10 @@ int main(int argc, char* argv[]) {
             }*/
 
             solver.solve();
-
-            dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+            //std::cout << msg.getOutputLevel() << "\n";
+            if(msg.getOutputLevel() >= 5){
+                dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+            }
         }
     }
     ippl::finalize();

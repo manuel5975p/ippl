@@ -35,6 +35,7 @@ find_package(Kokkos 4.0.0 REQUIRED)
 # Select flags.
 set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always ")
 set (CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g ")
 set (CMAKE_CXX_FLAGS_RELEASE "-O3")
 set (CMAKE_CXX_FLAGS_DEBUG  "-O0 -g -fsanitize=undefined,address")

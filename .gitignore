@@ -7,10 +7,10 @@ manual/*.idx
 manual/*.lof
 manual/*.lot
 manual/ippl_user_guide.pdf
-<<<<<<< HEAD
+
 build/
 .vscode/
-=======
+
 *~
 *.~
->>>>>>> bass/dev-3.2.0
+
