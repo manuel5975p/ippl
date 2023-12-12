@@ -29,14 +29,16 @@
 //
 
 #include "Ippl.h"
+#include <Kokkos_Core_fwd.hpp>
 
 #include <Kokkos_Macros.hpp>
 #include <cstdlib>
 
-#include "Utility/IpplException.h"
-#include "Utility/IpplTimings.h"
+
 #include <Kokkos_Random.hpp>
 #include "Solver/FDTDSolver.h"
+#include "PoissonSolvers/PoissonCG.h"
+#include "Utility/ParameterList.h"
 //#include "Solver/BoundaryDispatch.h"
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
@@ -67,17 +69,20 @@ struct generate_random {
         //value_type u;
         for (unsigned d = 0; d < Dim; ++d) {
             typename T::value_type w = inside[d].max() - inside[d].min();
-            if(d == 0){
-                Rview (i)[d] = rand_gen.normal(inside[d].min() + 0.8 * w, 0.03 * w);
-                Rn1view (i)[d] = rand_gen.normal(inside[d].min() + 0.8 * w, 0.03 * w);
+            if(d == 1){
+                value_type posd = rand_gen.normal(inside[d].min() + 0.8 * w, 0.03 * w);
+                Rview   (i)[d] = posd;
+                Rn1view (i)[d] = posd;
             }
             else{
-                Rview (i)[d] = rand_gen.normal(inside[d].min() + 0.5 * w, 0.03 * w);
-                Rn1view (i)[d] = rand_gen.normal(inside[d].min() + 0.5 * w, 0.03 * w);
+                value_type posd = rand_gen.normal(inside[d].min() + 0.5 * w, 0.03 * w);
+                Rview   (i)[d] = posd;
+                Rn1view (i)[d] = posd;
             }
             GBview(i)[d] = 0; //Irrelefant
         }
-        GBview(i)[1] = 1;
+        //GBview(i)[0] = 1;
+        //GBview(i)[2] = 0.1;
         
         // Give the state back, which will allow another thread to acquire it
         rand_pool.free_state(rand_gen);
@@ -243,14 +248,25 @@ int main(int argc, char* argv[]) {
         VField_t current;
         current.initialize(mesh, layout);
         current = 0.0;
-
         // turn on the seeding (gaussian pulse) - if set to false, sine pulse is added on rho
         bool seed = false;
 
         // define an FDTDSolver object
         
         using s_t = ippl::FDTDSolver<double, Dim>; 
-        s_t solver(rho, current, fieldE, fieldB, 1000, ippl::FDTDBoundaryCondition::ABC_FALLAHI, ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT, ippl::FDTDFieldUpdateRule::DO, dt, seed, &radiation);
+        s_t solver(
+            rho, 
+            current,
+            fieldE, 
+            fieldB,
+            1000,
+            ippl::FDTDBoundaryCondition::ABC_FALLAHI,
+            ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT,
+            ippl::FDTDFieldUpdateRule::DO,
+            dt,
+            seed,
+            &radiation
+        );
         auto srview = solver.bunch.R.getView();
         auto srn1view = solver.bunch.R_nm1.getView();
         auto gbrview = solver.bunch.gamma_beta.getView();
@@ -274,12 +290,45 @@ int main(int argc, char* argv[]) {
             //    
             //}
         );
-
+        Kokkos::fence();
+        rho = 0.0;
+        solver.bunch.Q.scatter(rho, solver.bunch.R);
+        s_t::Field_t::BConds_t ic_scalar_bcs;
+        {
+            auto bcsetter_single = [&ic_scalar_bcs, hr]<size_t Idx>(const std::index_sequence<Idx>&){
+                ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
+                return 0;
+            };
+            auto bcsetter = [bcsetter_single]<size_t... Idx>(const std::index_sequence<Idx...>&){
+                int x = (bcsetter_single(std::index_sequence<Idx>{}) ^ ...);
+                (void) x;
+            };
+            bcsetter(std::make_index_sequence<Dim * 2>{});
+            ippl::ParameterList list;
+            list.add("use_heffte_defaults", true);
+            list.add("output_type", ippl::PoissonCG<VField_t, Field_t>::SOL);
+            
+            Field_t urho = rho.deepCopy();
+            Field_t phi_ic = solver.phiN_m.deepCopy();
+            rho.setFieldBC(ic_scalar_bcs);
+            phi_ic.setFieldBC(ic_scalar_bcs);
+            
+            ippl::PoissonCG<Field_t, Field_t> initial_phi_solver(phi_ic, rho);
+            initial_phi_solver.mergeParameters(list);
+            try{
+                initial_phi_solver.solve();
+            }
+            catch(const IpplException& e){
+                LOG("Exception yoten: " << e.what());
+            }
+            Kokkos::deep_copy(solver.phiN_m.getView(), phi_ic.getView());
+            Kokkos::deep_copy(solver.phiNm1_m.getView(), phi_ic.getView());
+        }
         solver.phiN_m = 0;
         solver.phiNm1_m = 0;
         solver.fill_initialcondition(KOKKOS_LAMBDA(scalar x, scalar y, scalar z){
             (void)x;(void)y;(void)z;
-            return ippl::Vector<scalar, Dim>{0, x * 0.0f, 0};
+            return ippl::Vector<scalar, Dim>{0, x * 7.0, 0};
         });
         if (!seed && false) {
             // add pulse at center of domain
@@ -343,7 +392,7 @@ int main(int argc, char* argv[]) {
             solver.solve();
             //std::cout << msg.getOutputLevel() << "\n";
             if(msg.getOutputLevel() >= 5){
-                dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                dumpVTK(radiation, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
             }
         }
     }
