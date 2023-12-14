@@ -341,7 +341,7 @@ namespace ippl {
         // (TF/SF = total-field/scattered-field technique)
         // finally, absorbing boundary conditions are imposed
         (*rhoN_mp) = 0.0;
-        bunch.Q.scatter(*rhoN_mp, bunch.R);
+        bunch.Q.scatterVolumetricallyCorrect(*rhoN_mp, bunch.R);
         if(field_update_m == FDTDFieldUpdateRule::DO){
             const auto dt = this->dt;
             const auto hr_m = this->hr_m;
@@ -602,7 +602,7 @@ namespace ippl {
         bunch.R_np12 = (bunch.R + bunch.R_np1) * 0.5;
         bunch.R_nm12 = (bunch.R + bunch.R_nm1) * 0.5;
 
-        bunch.Q.scatter(*this->JN_mp, bunch.R_nm12, bunch.R_np12, scalar(1.0) / (dt * hr_m[0] * hr_m[1] * hr_m[2]));
+        bunch.Q.scatterVolumetricallyCorrect(*this->JN_mp, bunch.R_nm12, bunch.R_np12, scalar(1.0) / dt);
 
         Kokkos::deep_copy(bunch.R_nm1.getView(), bunch.R.getView());
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
