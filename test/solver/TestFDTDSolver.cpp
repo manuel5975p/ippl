@@ -260,7 +260,7 @@ int main(int argc, char* argv[]) {
             fieldE, 
             fieldB,
             1000,
-            ippl::FDTDBoundaryCondition::ABC_FALLAHI,
+            ippl::FDTDBoundaryCondition::ABC_MUR,
             ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT,
             ippl::FDTDFieldUpdateRule::DO,
             dt,
@@ -324,12 +324,12 @@ int main(int argc, char* argv[]) {
             Kokkos::deep_copy(solver.phiN_m.getView(), phi_ic.getView());
             Kokkos::deep_copy(solver.phiNm1_m.getView(), phi_ic.getView());
         }
-        solver.phiN_m = 0;
-        solver.phiNm1_m = 0;
-        solver.fill_initialcondition(KOKKOS_LAMBDA(scalar x, scalar y, scalar z){
-            (void)x;(void)y;(void)z;
-            return ippl::Vector<scalar, Dim>{0, x * 7.0, 0};
-        });
+        //solver.phiN_m = 0;
+        //solver.phiNm1_m = 0;
+        //solver.fill_initialcondition(KOKKOS_LAMBDA(scalar x, scalar y, scalar z){
+        //    (void)x;(void)y;(void)z;
+        //    return ippl::Vector<scalar, Dim>{0, x * 7.0, 0};
+        //});
         if (!seed && false) {
             // add pulse at center of domain
             auto view_rho    = rho.getView();

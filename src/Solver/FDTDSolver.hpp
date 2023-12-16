@@ -584,16 +584,14 @@ namespace ippl {
                 //LOG("XP: " << rnp1view(0)[0]);
                 const scalar xd = xposn - xpos;
                 const scalar yd = yposn - ypos;
+                
                 Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
                     using Kokkos::sqrt;
                     rnp1view(i) = rview(i);
                     rnp1view(i)[0] = rview(i)[0] + xd;
                     rnp1view(i)[1] = rview(i)[1] + yd;
-                    //if(_iter == 0){
-                    //    std::cout << rnp1view(i) << " from " << rview(i) << std::endl;
-                    //}
                 });
-            }
+            }break;
             case FDTDParticleUpdateRule::STATIONARY:{
                 Kokkos::deep_copy(rnp1view, rview);
             }break;
