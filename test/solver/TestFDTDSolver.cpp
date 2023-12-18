@@ -36,6 +36,7 @@
 
 
 #include <Kokkos_Random.hpp>
+#include <fstream>
 #include "Solver/FDTDSolver.h"
 #include "PoissonSolvers/PoissonCG.h"
 #include "Utility/ParameterList.h"
@@ -70,7 +71,7 @@ struct generate_random {
         for (unsigned d = 0; d < Dim; ++d) {
             typename T::value_type w = inside[d].max() - inside[d].min();
             if(d == 1){
-                value_type posd = rand_gen.normal(inside[d].min() + 0.8 * w, 0.03 * w);
+                value_type posd = rand_gen.normal(inside[d].min() + 0.6 * w, 0.03 * w);
                 Rview   (i)[d] = posd;
                 Rn1view (i)[d] = posd;
             }
@@ -253,13 +254,14 @@ int main(int argc, char* argv[]) {
 
         // define an FDTDSolver object
         
-        using s_t = ippl::FDTDSolver<double, Dim>; 
+        using s_t = ippl::FDTDSolver<double, Dim>;
+        
         s_t solver(
             rho, 
             current,
             fieldE, 
             fieldB,
-            1000,
+            2000,
             ippl::FDTDBoundaryCondition::ABC_MUR,
             ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT,
             ippl::FDTDFieldUpdateRule::DO,
@@ -267,6 +269,10 @@ int main(int argc, char* argv[]) {
             seed,
             &radiation
         );
+        std::ofstream rad_output("radiation.txt");
+        std::ofstream p0pos_output("partpos.txt");
+        solver.output_stream[ippl::trackableOutput::boundaryRadiation] = &rad_output;
+        solver.output_stream[ippl::trackableOutput::p0pos] = &p0pos_output;
         auto srview = solver.bunch.R.getView();
         auto srn1view = solver.bunch.R_nm1.getView();
         auto gbrview = solver.bunch.gamma_beta.getView();
@@ -292,7 +298,7 @@ int main(int argc, char* argv[]) {
         );
         Kokkos::fence();
         rho = 0.0;
-        solver.bunch.Q.scatter(rho, solver.bunch.R);
+        solver.bunch.Q.scatterVolumetricallyCorrect(rho, solver.bunch.R);
         s_t::Field_t::BConds_t ic_scalar_bcs;
         {
             auto bcsetter_single = [&ic_scalar_bcs, hr]<size_t Idx>(const std::index_sequence<Idx>&){

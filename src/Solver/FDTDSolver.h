@@ -19,6 +19,7 @@
 #ifndef FDTD_SOLVER_H_
 #define FDTD_SOLVER_H_
 
+#include <ostream>
 #include "Types/Vector.h"
 
 //#include "Solver/BoundaryDispatch.h"
@@ -26,8 +27,6 @@
 
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
-
-
 
 template <typename _scalar, class PLayout>
 struct  Bunch : public ippl::ParticleBase<PLayout> {
@@ -114,6 +113,9 @@ namespace ippl {
     };
     enum struct FDTDFieldUpdateRule{
         DONT, DO
+    };
+    enum struct trackableOutput{
+        boundaryRadiation, p0pos
     };
 
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<double, Dim>,
@@ -207,6 +209,7 @@ namespace ippl {
         double absorbed__energy;
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;
+        std::map<trackableOutput, std::ostream*> output_stream;
     };
 }  // namespace ippl
 

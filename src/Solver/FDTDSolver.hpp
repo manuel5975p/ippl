@@ -27,6 +27,7 @@
 #include "Field/HaloCells.h"
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
+#include <cstdlib>
 #include <cstring>
 #define LOG(X) std::cout << from_last_slash(__FILE__) << ':' << __LINE__ << ": " << X << "\n"
 inline const char* from_last_slash(const char* x){
@@ -576,11 +577,11 @@ namespace ippl {
             case FDTDParticleUpdateRule::CIRCULAR_ORBIT:{
                 using Kokkos::sin;
                 using Kokkos::cos;
-                const scalar xpos  = sin(time) * 0.3 + 0.5;
-                const scalar ypos  = cos(time) * 0.3 + 0.5;
+                const scalar xpos  = sin(5.0 * (time)) * 0.1 + 0.5;
+                const scalar ypos  = cos(5.0 * (time)) * 0.1 + 0.5;
 
-                const scalar xposn = sin(time + dt) * 0.3 + 0.5;
-                const scalar yposn = cos(time + dt) * 0.3 + 0.5;
+                const scalar xposn = sin(5.0 * (time + dt)) * 0.1 + 0.5;
+                const scalar yposn = cos(5.0 * (time + dt)) * 0.1 + 0.5;
                 //LOG("XP: " << rnp1view(0)[0]);
                 const scalar xd = xposn - xpos;
                 const scalar yd = yposn - ypos;
@@ -651,38 +652,45 @@ namespace ippl {
         }
         //return 0.0;
         auto Bview = Bn_mp->getView();
+        
         auto Eview = En_mp->getView();
         tracer_bunch.E_gather.gather(*(this->En_mp), tracer_bunch.R);
         tracer_bunch.B_gather.gather(*(this->Bn_mp), tracer_bunch.R);
+        auto rview = tracer_bunch.R.getView();
         auto tbev = tracer_bunch.E_gather.getView();
         auto tbbv = tracer_bunch.B_gather.getView();
         auto tnbv = tracer_bunch.outward_normal.getView();
         Tfields radiation_on_boundary = 0.0;
         Kokkos::parallel_reduce(tracer_bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i, Tfields& ref){
+            using Kokkos::abs;
             ref += dot_prod(tnbv(i), cross_prod(tbev(i), tbbv(i)));
+            //auto p = rview(i);
+            //p -= 0.5;
+            //assert(abs<double>(dot_prod(p, p) - 0.25) < 1e-10);
+            assert(abs<double>(dot_prod(tnbv(i), tnbv(i)) - 1.0) < 1e-10);
+            
         }, radiation_on_boundary);
         radiation_on_boundary *= 4.0 * M_PI * 0.5 * 0.5 / tracer_bunch.getLocalNum();
-        LOG("Boundary radiation: " << radiation_on_boundary);
+        if(output_stream.contains(trackableOutput::boundaryRadiation)){
+            *(output_stream.at(trackableOutput::boundaryRadiation)) << this->dt * iteration << " " << radiation_on_boundary << "\n";
+        }
+        LOG("Boundary radiation: " << this->dt * iteration << " " << radiation_on_boundary);
         absorbed__energy += dt * radiation_on_boundary;
         //LOG("Cumulative radiation: " << this->absorbed__energy);
         Kokkos::fence();
-        Vector_t Jsum(0.0);
-        auto jview = JN_mp->getView();
-        Kokkos::parallel_reduce(ippl::getRangePolicy(jview, 0), KOKKOS_LAMBDA(size_t i, size_t j, size_t k, Vector_t& ref){
-            //if(dot_prod(jview(i,j,k), jview(i,j,k)) > 0)
-            //    LOG("Jview: " << jview(i,j,k));
-            ref += jview(i,j,k);
-        }, Jsum);
+        Vector_t Jsum = JN_mp->sum();
         Jsum *= hr_m[0] * hr_m[1] * hr_m[2];
         //std::cerr << "vol_avg Q = " << rhoN_mp->sum() * hr_m[0] * hr_m[1] * hr_m[2] << "\n";
         //std::cerr << "vol_avg J = " << std::sqrt(dot_prod(Jsum, Jsum)) << "\n";
         Vector_t p0pos(0.0);
-        auto kv = Kokkos::subview(bunch.R.getView(), 1);
         auto brview = bunch.R.getView();
         Kokkos::parallel_reduce(1, KOKKOS_LAMBDA(size_t i, Vector_t& ref){
             ref += brview(i);
         }, p0pos);
-        LOG("Particle pos: " << p0pos[0] << " " << p0pos[1] << " " << p0pos[2]);
+        if(output_stream.contains(trackableOutput::p0pos)){
+            *(output_stream.at(trackableOutput::p0pos)) << p0pos[0] << " " << p0pos[1] << "\n";
+        }
+        //std::cerr << "Particle pos: " << p0pos[0] << " " << p0pos[1] << " " << p0pos[2] << "\n";
         return 0.0;
     };
 
@@ -733,7 +741,7 @@ namespace ippl {
 
         bunch.create(pcount_m);
         bunch.Q = 1.0;
-        size_t tracer_count = 500 * 500;
+        size_t tracer_count = 800 * 800;
         {
             size_t tcisqrt = (size_t)(std::sqrt((double)tracer_count));
             if(tcisqrt * tcisqrt != tracer_count){
