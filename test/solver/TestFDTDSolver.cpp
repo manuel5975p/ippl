@@ -255,20 +255,21 @@ int main(int argc, char* argv[]) {
         // define an FDTDSolver object
         
         using s_t = ippl::FDTDSolver<double, Dim>;
-        
+        size_t pcount = 100;
         s_t solver(
             rho, 
             current,
             fieldE, 
             fieldB,
-            2000,
-            ippl::FDTDBoundaryCondition::ABC_MUR,
-            ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT,
+            pcount,
+            ippl::FDTDBoundaryCondition::ABC_FALLAHI,
+            ippl::FDTDParticleUpdateRule::XLINE,
             ippl::FDTDFieldUpdateRule::DO,
             dt,
             seed,
             &radiation
         );
+        solver.bunch.setParticleBC(ippl::BC::PERIODIC);
         std::ofstream rad_output("radiation.txt");
         std::ofstream p0pos_output("partpos.txt");
         solver.output_stream[ippl::trackableOutput::boundaryRadiation] = &rad_output;
@@ -282,19 +283,19 @@ int main(int argc, char* argv[]) {
         
         Kokkos::parallel_for(
             Kokkos::RangePolicy<typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(0, solver.bunch.getLocalNum()),
-            generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-                solver.bunch.R.getView(),
-                solver.bunch.R_nm1.getView(),
-                solver.bunch.gamma_beta.getView(),
-                regions_view(ippl::Comm->rank()),
-                rand_pool
-            )
-            //KOKKOS_LAMBDA(size_t idx){
-            //    srview(idx) = ippl::Vector<scalar, Dim>{0.8, 0.5, 0.5};
-            //    srn1view(idx) = ippl::Vector<scalar, Dim>{0.8, 0.5, 0.5};
-            //    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
-            //    
-            //}
+            //generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+            //    solver.bunch.R.getView(),
+            //    solver.bunch.R_nm1.getView(),
+            //    solver.bunch.gamma_beta.getView(),
+            //    regions_view(ippl::Comm->rank()),
+            //    rand_pool
+            //)
+            KOKKOS_LAMBDA(size_t idx){
+                srview(idx) = ippl::Vector<scalar, Dim>  {(idx) / scalar(pcount), 0.50234, 0.50341523765};
+                srn1view(idx) = ippl::Vector<scalar, Dim>{(idx) / scalar(pcount), 0.50234, 0.50341523765};
+                gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
+                
+            }
         );
         Kokkos::fence();
         rho = 0.0;
@@ -398,7 +399,7 @@ int main(int argc, char* argv[]) {
             solver.solve();
             //std::cout << msg.getOutputLevel() << "\n";
             if(msg.getOutputLevel() >= 5){
-                dumpVTK(radiation, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
             }
         }
     }

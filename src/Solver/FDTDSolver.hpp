@@ -532,6 +532,7 @@ namespace ippl {
         auto Qview = bunch.Q.getView();
         auto rview = bunch.R.getView();
         auto rnp1view = bunch.R_np1.getView();
+        auto rnm1view = bunch.R_nm1.getView();
 
         auto E_gatherview = bunch.E_gather.getView();
         auto B_gatherview = bunch.B_gather.getView();
@@ -593,6 +594,14 @@ namespace ippl {
                     rnp1view(i)[1] = rview(i)[1] + yd;
                 });
             }break;
+            case FDTDParticleUpdateRule::XLINE:{
+                auto dt_cap = this->dt;
+                Kokkos::parallel_for(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(const size_t i){
+                    using Kokkos::sqrt;
+                    rnp1view(i) = rview(i);
+                    rnp1view(i)[0] += dt_cap * 0.8;
+                });
+            }break;
             case FDTDParticleUpdateRule::STATIONARY:{
                 Kokkos::deep_copy(rnp1view, rview);
             }break;
@@ -602,24 +611,31 @@ namespace ippl {
         bunch.R_nm12 = (bunch.R + bunch.R_nm1) * 0.5;
 
         bunch.Q.scatterVolumetricallyCorrect(*this->JN_mp, bunch.R_nm12, bunch.R_np12, scalar(1.0) / dt);
-
+        
         Kokkos::deep_copy(bunch.R_nm1.getView(), bunch.R.getView());
         Kokkos::deep_copy(bunch.R.getView(), bunch.R_np1.getView());
 
-        Kokkos::View<bool*> invalid("OOB Particcel", bunch.getLocalNum());
-        size_t invalid_count = 0;
-        
-        Kokkos::parallel_reduce(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(size_t i, size_t& ref){
-            bool out_of_bounds = false;
-            ippl::Vector<scalar, Dim> ppos = rview(i);
-            for(size_t i = 0;i < Dim;i++){
-                out_of_bounds |= (ppos[i] <= 0.0);
-                out_of_bounds |= (ppos[i] >= 1.0); //Check against simulation domain
-            }
-            invalid(i) = out_of_bounds;
-            ref += out_of_bounds;
-        }, invalid_count);
-        bunch.destroy(invalid, invalid_count);
+        //Kokkos::View<bool*> invalid("OOB Particcel", bunch.getLocalNum());
+        //size_t invalid_count = 0;
+        Kokkos::View<Vector_t*> diffview("diffview", bunch.getLocalNum());
+        Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(size_t idx){
+            diffview(idx) = rnm1view(idx) - rview(idx);
+        });
+        pl.update(bunch);
+        Kokkos::parallel_for(bunch.getLocalNum(), KOKKOS_LAMBDA(size_t idx){
+            rnm1view(idx)= diffview(idx) + rview(idx);
+        });
+        //Kokkos::parallel_reduce(Kokkos::RangePolicy<typename playout_type::RegionLayout_t::view_type::execution_space>(0, bunch.getLocalNum()), KOKKOS_LAMBDA(size_t i, size_t& ref){
+        //    bool out_of_bounds = false;
+        //    ippl::Vector<scalar, Dim> ppos = rview(i);
+        //    for(size_t i = 0;i < Dim;i++){
+        //        out_of_bounds |= (ppos[i] <= 0.0);
+        //        out_of_bounds |= (ppos[i] >= 1.0); //Check against simulation domain
+        //    }
+        //    invalid(i) = out_of_bounds;
+        //    ref += out_of_bounds;
+        //}, invalid_count);
+        //bunch.destroy(invalid, invalid_count);
 
         // evaluate E and B fields at N
         

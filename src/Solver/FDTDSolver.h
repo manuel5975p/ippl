@@ -109,7 +109,7 @@ namespace ippl {
 
     //TODO: Maybe switch to std::function
     enum struct FDTDParticleUpdateRule{
-        LORENTZ, CIRCULAR_ORBIT, DIPOLE_ORBIT, STATIONARY
+        LORENTZ, CIRCULAR_ORBIT, DIPOLE_ORBIT, XLINE, STATIONARY
     };
     enum struct FDTDFieldUpdateRule{
         DONT, DO
