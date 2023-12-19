@@ -156,6 +156,8 @@ namespace ippl {
         // initialization of FDTD solver
         void initialize();
 
+        void setBoundaryConditions(const ippl::Vector<FDTDBoundaryCondition, Dim>& bcs);
+
     public:
         // mesh and layout objects
         M* mesh_mp;
@@ -194,7 +196,7 @@ namespace ippl {
         VField_t* Bn_mp;
         VField_t* radiation_mp;
 
-        FDTDBoundaryCondition bconds_m;
+        Vector<FDTDBoundaryCondition, Dim> bconds_m;
         FDTDParticleUpdateRule particle_update_m;
         FDTDFieldUpdateRule field_update_m;
         using playout_type = ippl::ParticleSpatialLayout<Tfields, 3>;

@@ -331,6 +331,8 @@ int main(int argc, char* argv[]) {
             Kokkos::deep_copy(solver.phiN_m.getView(), phi_ic.getView());
             Kokkos::deep_copy(solver.phiNm1_m.getView(), phi_ic.getView());
         }
+        solver.setBoundaryConditions(ippl::Vector<ippl::FDTDBoundaryCondition, Dim>{
+            ippl::FDTDBoundaryCondition::PERIODIC, ippl::FDTDBoundaryCondition::ABC_MUR, ippl::FDTDBoundaryCondition::ABC_MUR});
         //solver.phiN_m = 0;
         //solver.phiNm1_m = 0;
         //solver.fill_initialcondition(KOKKOS_LAMBDA(scalar x, scalar y, scalar z){
@@ -346,7 +348,7 @@ int main(int argc, char* argv[]) {
             auto ldom        = layout.getLocalNDIndex();
 
             Kokkos::parallel_for(
-                "Assign gaussian cylinder", ippl::getRangePolicy(view_A, 2),
+                "Assign gaussian cylinder", ippl::getRangePolicy(view_A, 0),
                 KOKKOS_LAMBDA(const int i, const int j, const int k) {
                     const int ig = i + ldom[0].first() - nghost;
                     const int jg = j + ldom[1].first() - nghost;
@@ -358,8 +360,8 @@ int main(int argc, char* argv[]) {
                     double z = (kg + 0.5) * hr[2] + origin[2];
 
                     //if ((x == 0.5) && (y == 0.5) && (z == 0.5))
-                    view_A  (i, j, k)[1] = 0.0 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
-                    view_Am1(i, j, k)[1] = 0.0 * Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_A  (i, j, k)[1] = Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
+                    view_Am1(i, j, k)[1] = Kokkos::exp(-60.0 * ((x - 0.5) * (x - 0.5)));
 
                     (void)x;(void)y;(void)z;
                     (void)ig;(void)jg;(void)kg; //Suppress warnings lol
@@ -399,7 +401,7 @@ int main(int argc, char* argv[]) {
             solver.solve();
             //std::cout << msg.getOutputLevel() << "\n";
             if(msg.getOutputLevel() >= 5){
-                dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
             }
         }
     }
