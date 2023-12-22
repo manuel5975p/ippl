@@ -24,9 +24,11 @@
 
 #include "FDTDSolver.h"
 // #include <Kokkos_View.hpp>
+#include <Kokkos_Macros.hpp>
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 
 #include "Field/HaloCells.h"
 #include "FieldLayout/FieldLayout.h"
@@ -801,7 +803,38 @@ namespace ippl {
         auto tbev                     = tracer_bunch.E_gather.getView();
         auto tbbv                     = tracer_bunch.B_gather.getView();
         auto tnbv                     = tracer_bunch.outward_normal.getView();
+        /*auto invdx = Bn_mp->get_mesh().getMeshSpacing();
+        auto origin = Bn_mp->get_mesh().getOrigin();
+        const FieldLayout<Dim>& layout = Bn_mp->getLayout();
+        const NDIndex<Dim> lDom       = layout.getLocalNDIndex();
+        const int nghost               = Bn_mp->getNghost();
+        const auto nr               = this->nr_m;*/
         Tfields radiation_on_boundary = 0.0;
+        if(iteration == 500){
+            /*Kokkos::parallel_for(ippl::getRangePolicy(Bn_mp->getView(), 1), KOKKOS_LAMBDA(size_t i, size_t j, size_t k, double& ref){
+                using PositionType = Tfields;
+                using vector_type = Vector_t;
+                using Field = VField_t;
+                vector_type l                        = (vector_type{0.6 / nr,0.6,0.6} - origin) * invdx + 0.5;
+                ippl::Vector<int, Field::dim> index        = l;
+                ippl::Vector<PositionType, Field::dim> whi = l - index;
+                ippl::Vector<PositionType, Field::dim> wlo = 1.0 - whi;
+
+                Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
+
+                // gather
+                dview_m(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},
+                                                       Bview, wlo, whi, args);
+            
+            });*/
+            std::ofstream ostr("dB.txt");
+            for(size_t i = 0;i < tracer_bunch.getLocalNum();i++){
+                Vector_t dist = tracer_bunch.R.getView()(i);
+                double absd = Kokkos::sqrt((dist[1] - 0.5) * (dist[1] - 0.5) + (dist[2] - 0.5) * (dist[2] - 0.5));
+                double B = Kokkos::sqrt(dot_prod(tracer_bunch.B_gather.getView()(i), tracer_bunch.B_gather.getView()(i)));
+                ostr << absd << " " << B << "\n";
+            }
+        }
         Kokkos::parallel_reduce(
             tracer_bunch.getLocalNum(),
             KOKKOS_LAMBDA(size_t i, Tfields & ref) {
@@ -885,7 +918,7 @@ namespace ippl {
 
         bunch.create(pcount_m);
         bunch.Q             = 1.0;
-        size_t tracer_count = 800 * 800;
+        size_t tracer_count = 100 * 100;
         {
             size_t tcisqrt = (size_t)(std::sqrt((double)tracer_count));
             if (tcisqrt * tcisqrt != tracer_count) {

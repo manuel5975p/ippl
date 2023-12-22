@@ -6,9 +6,12 @@
 #define IPPL_EXPRESSIONS_H
 
 #include <type_traits>
+#include <cstddef>
+#include <Kokkos_Macros.hpp>
 
 namespace ippl {
     namespace detail {
+        using std::size_t;
         /*!
          * @file IpplExpressions.h
          *

@@ -6,6 +6,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <Kokkos_Macros.hpp>
 
 namespace ippl {
     namespace detail {

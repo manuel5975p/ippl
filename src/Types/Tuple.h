@@ -1,13 +1,12 @@
 //
-// Class Vector
-//   Vector class used for vector fields and particle attributes like the coordinate.
+// Class Tuple
+//   Tuple class used for Tuple fields and particle attributes like the coordinate.
 //
 #ifndef IPPL_Tuple_H
 #define IPPL_Tuple_H
 #include <Kokkos_Macros.hpp>
 #include <concepts>
 #include <cstddef>
-#include <functional>
 #include <type_traits>
 #include <utility>
 

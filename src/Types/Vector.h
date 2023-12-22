@@ -6,6 +6,7 @@
 #define IPPL_Vector_H
 
 #include <initializer_list>
+#include <vector>
 
 #include "Expression/IpplExpressions.h"
 
