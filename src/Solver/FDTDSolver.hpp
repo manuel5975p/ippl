@@ -917,7 +917,7 @@ namespace ippl {
         aNp1_m = 0.0;
 
         bunch.create(pcount_m);
-        bunch.Q             = 1.0;
+        bunch.Q             = 1.0 / pcount_m;
         size_t tracer_count = 100 * 100;
         {
             size_t tcisqrt = (size_t)(std::sqrt((double)tracer_count));
