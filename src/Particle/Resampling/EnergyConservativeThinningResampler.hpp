@@ -23,7 +23,11 @@ namespace ippl{
         Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
         Kokkos::fence(); //Wait for wsum_only_over_local
 
-        const size_t local_selection_count = this->selectionCount_m * esum_only_over_local / esum; //uuuuuuhh yes
+        size_t local_selection_count = this->selectionCount_m * esum_only_over_local / esum; //uuuuuuhh yes
+        T fracpart = this->selectionCount_m * esum_only_over_local / esum - local_selection_count;
+        if(fracpart && Comm->rank() == 0){
+            local_selection_count++;
+        }
 
         T scan_dummy = 0.0; //Input for parallel scan. But we already know it's going to be = 1.
         Kokkos::parallel_scan("Cumulative selection weights scan", local_size,
@@ -41,11 +45,11 @@ namespace ippl{
         Kokkos::fence();
 
         size_t destroyCount = 0;
-        const T normalization_factor = esum_only_over_local / this->selectionCount_m;
+        const T normalization_factor = esum / this->selectionCount_m;
         Kokkos::parallel_reduce(local_size, KOKKOS_LAMBDA(size_t idx, size_t& refDestroyCount){
             if(selectionCount(idx)){
                 remove(idx) = false;
-                wview(idx) = selectionCount(idx) * normalization_factor; 
+                wview(idx) = T(selectionCount(idx)) * normalization_factor; 
             }
             else{
                 remove(idx) = true;

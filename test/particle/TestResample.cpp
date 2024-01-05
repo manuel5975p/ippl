@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
         
         std::cout << bunch.getLocalNum() << " particcles\n";
         //ippl::SimpleThinningResampler<bunch_type, double, 3> resampler(0.5);
-        ippl::EnergyConservativeThinningResampler<bunch_type, double, 3> resampler(100, bunch.Q);
+        ippl::EnergyConservativeThinningResampler<bunch_type, double, 3> resampler(10000, bunch.Q);
         resampler(bunch);
         std::cout << bunch.getLocalNum() << " particcles\n";
         
