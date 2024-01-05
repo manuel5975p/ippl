@@ -209,6 +209,19 @@ namespace ippl {
     inline void scatter(const Attrib1& attrib, Field& f, const Attrib2& pp) {
         attrib.scatter(f, pp);
     }
+    template <typename Attrib1, typename WAttrib, typename Field, typename Attrib2>
+    inline void scatterWeighted(const Attrib1& attrib, const WAttrib& weight, Field& f, const Attrib2& pp) {
+        auto aview = attrib.getView();
+        auto wview = weight.getView();
+        size_t asize = attrib.size();
+        Kokkos::parallel_for(asize, KOKKOS_LAMBDA(detail::size_type idx){
+            aview(idx) *= wview(idx);
+        });
+        attrib.scatter(f, pp);
+        Kokkos::parallel_for(asize, KOKKOS_LAMBDA(detail::size_type idx){
+            aview(idx) /= wview(idx);
+        });
+    }
 
     template <typename Attrib1, typename Field, typename Attrib2>
     inline void gather(Attrib1& attrib, Field& f, const Attrib2& pp) {

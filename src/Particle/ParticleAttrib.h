@@ -123,6 +123,9 @@ namespace ippl {
         void scatter(Field& f,
                      const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp) const;
 
+        template <typename Attrib1, typename WAttrib, typename Field, typename Attrib2>
+        void scatterWeighted(Attrib1& attrib, const WAttrib& weight, Field& f, const Attrib2& pp);
+
         template <typename Field, typename P2>
         void gather(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp);
 

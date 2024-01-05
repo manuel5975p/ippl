@@ -16,6 +16,9 @@ set (COMPILE_FLAGS ${OPAL_CXX_FLAGS})
 add_executable (TestScatter TestScatter.cpp)
 target_link_libraries (TestScatter ${IPPL_LIBS})
 
+add_executable (TestResample TestResample.cpp)
+target_link_libraries (TestResample ${IPPL_LIBS})
+
 add_executable (TestGather TestGather.cpp)
 target_link_libraries (TestGather ${IPPL_LIBS})
 

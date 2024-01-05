@@ -141,6 +141,16 @@ namespace ippl {
          * @returns processor local number of particles
          */
         size_type getLocalNum() const { return localNum_m; }
+        
+        /*!
+         * @returns pointer to processor local number of particles
+         */
+        size_type* getLocalNumPointer() { return &localNum_m; }
+
+        /*!
+         * @returns pointer to processor local number of particles
+         */
+        const size_type* getLocalNumPointer() const { return &localNum_m; }
 
         void setLocalNum(size_type size) { localNum_m = size; }
 
