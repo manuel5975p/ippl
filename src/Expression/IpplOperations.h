@@ -6,7 +6,7 @@
 #define IPPL_OPERATIONS_H
 
 #include <Kokkos_MathematicalFunctions.hpp>
-#include <tuple>
+#include <cassert>
 
 namespace ippl {
     /*!
@@ -70,13 +70,16 @@ namespace ippl {
     template <typename E>                                                   \
     struct fun : public detail::Expression<fun<E>, sizeof(E)> {             \
         constexpr static unsigned dim = E::dim;                             \
-                                                                            \
+        using value_type = typename E::value_type;                          \
         KOKKOS_FUNCTION                                                     \
         fun(const E& u)                                                     \
             : u_m(u) {}                                                     \
                                                                             \
         KOKKOS_INLINE_FUNCTION auto operator[](size_t i) const {            \
             return op1;                                                     \
+        }                                                                   \
+        auto getValidRange() const {                                        \
+            return u_m.getValidRange();                                     \
         }                                                                   \
                                                                             \
         template <typename... Args>                                         \
@@ -132,7 +135,7 @@ namespace ippl {
     template <typename E1, typename E2>                                                        \
     struct fun : public detail::Expression<fun<E1, E2>, sizeof(E1) + sizeof(E2)> {             \
         constexpr static unsigned dim = std::max(E1::dim, E2::dim);                            \
-                                                                                               \
+        using value_type = typename E1::value_type;                                            \
         KOKKOS_FUNCTION                                                                        \
         fun(const E1& u, const E2& v)                                                          \
             : u_m(u)                                                                           \
@@ -141,7 +144,34 @@ namespace ippl {
         KOKKOS_INLINE_FUNCTION auto operator[](size_t i) const {                               \
             return op1;                                                                        \
         }                                                                                      \
-                                                                                               \
+        auto getValidRange() const {                                                           \
+            auto ur = u_m.getValidRange();                                                     \
+            auto vr = v_m.getValidRange();                                                     \
+            if (ur.has_value() && vr.has_value()) {                                            \
+                if constexpr (dim == 1) {                                                      \
+                    assert(ur.value().begin() == vr.value().begin());                          \
+                    assert(ur.value().end() == vr.value().end());                              \
+                }                                                                              \
+                if constexpr (dim > 1) {                                                       \
+                    auto ulower = ur.value().m_lower;                                          \
+                    auto uupper = ur.value().m_upper;                                          \
+                    auto vlower = vr.value().m_lower;                                          \
+                    auto vupper = vr.value().m_upper;                                          \
+                    for (unsigned d = 0; d < dim; d++) {                                       \
+                        assert(ulower == vlower);                                              \
+                        assert(uupper == vupper);                                              \
+                    }                                                                          \
+                }                                                                              \
+                /*typename decltype(ur)::value_type ret(ulower, uupper);*/                     \
+                return ur;                                                                     \
+            } else if (ur.has_value()) {                                                       \
+                return ur;                                                                     \
+            } else if (vr.has_value()) {                                                       \
+                return vr;                                                                     \
+            } else {                                                                           \
+                __builtin_unreachable();/*TODO: Handle both unranged*/                         \
+            }                                                                                  \
+        }                                                                                      \
         template <typename... Args>                                                            \
         KOKKOS_INLINE_FUNCTION auto operator()(Args... args) const {                           \
             static_assert(sizeof...(Args) == dim || dim == 0);                                 \
@@ -251,6 +281,20 @@ namespace ippl {
     }
 
     namespace detail {
+        template<typename E>
+        concept with_value_type = requires(){
+            {typename E::value_type()};
+        };
+        template<typename E>
+        struct peel_value_type_impl{
+            using type = E;
+        };
+        template<with_value_type E>
+        struct peel_value_type_impl<E>{
+            using type = typename E::value_type;
+        };
+        template<typename E>
+        using peel_value_type = typename peel_value_type_impl<E>::type;
         /*!
          * Meta function of dot product.
          */
@@ -258,7 +302,7 @@ namespace ippl {
         struct meta_dot : public Expression<meta_dot<E1, E2>, sizeof(E1) + sizeof(E2)> {
             constexpr static unsigned dim = E1::dim;
             static_assert(E1::dim == E2::dim);
-
+            using value_type = peel_value_type<E1>;
             KOKKOS_FUNCTION
             meta_dot(const E1& u, const E2& v)
                 : u_m(u)
@@ -308,7 +352,7 @@ namespace ippl {
                   meta_grad<E>,
                   sizeof(E) + sizeof(typename E::Mesh_t::vector_type[E::Mesh_t::Dimension])> {
             constexpr static unsigned dim = E::dim;
-
+            using value_type = typename E::Mesh_t::vector_type;
             KOKKOS_FUNCTION
             meta_grad(const E& u, const typename E::Mesh_t::vector_type vectors[])
                 : u_m(u) {
@@ -417,7 +461,8 @@ namespace ippl {
             : public Expression<meta_laplace<E>,
                                 sizeof(E) + sizeof(typename E::Mesh_t::vector_type)> {
             constexpr static unsigned dim = E::dim;
-
+            
+            using value_type = typename E::Mesh_t::value_type;
             KOKKOS_FUNCTION
             meta_laplace(const E& u, const typename E::Mesh_t::vector_type& hvector)
                 : u_m(u)

@@ -5,10 +5,15 @@
 #ifndef IPPL_EXPRESSIONS_H
 #define IPPL_EXPRESSIONS_H
 
+#include <functional>
+#include <optional>
 #include <type_traits>
-
 namespace ippl {
     namespace detail {
+        template <typename E>
+        concept rangedExpression = requires(E exp) {
+            { exp.getValidRange() };
+        };
         /*!
          * @file IpplExpressions.h
          *
@@ -25,6 +30,10 @@ namespace ippl {
         template <typename E, size_t N = sizeof(E)>
         struct Expression {
             constexpr static unsigned dim = E::dim;
+            template<bool dummy = false>
+            struct value_type_getter{
+                using type = typename E::value_type;
+            };
 
             /*!
              * Access single element of the expression
@@ -32,6 +41,32 @@ namespace ippl {
             KOKKOS_INLINE_FUNCTION auto operator[](size_t i) const {
                 return static_cast<const E&>(*this)[i];
             }
+
+            template <typename... Args>
+                requires(dim == 0 || (sizeof...(Args) == dim))
+            KOKKOS_INLINE_FUNCTION auto operator()(Args&&... args) const {
+                return static_cast<const E&>(*this)(std::forward<Args>(args)...);
+            }
+            template <bool dummy = false>
+                requires(rangedExpression<E>)
+            auto getValidRange() const {
+                auto ret = static_cast<const E&>(*this).getValidRange();
+                return ret;
+            }
+
+            template <bool dummy = false>
+                requires(!rangedExpression<E>)
+            auto getValidRange() const {
+                return std::nullopt;
+            }
+            template<bool dummy = false>
+            typename value_type_getter<dummy>::type sum()const;
+            template<bool dummy = false>
+            typename value_type_getter<dummy>::type prod()const;
+            template<bool dummy = false>
+            typename value_type_getter<dummy>::type min()const;
+            template<bool dummy = false>
+            typename value_type_getter<dummy>::type max()const;
         };
 
         /*!

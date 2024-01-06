@@ -80,6 +80,10 @@ namespace ippl {
             return count * sizeof(value_type);
         }
 
+        auto getValidRange()const{
+            return std::make_optional(ippl::getRangePolicy(getView()));
+        }
+
         void resize(size_type n) { Kokkos::resize(dview_m, n); }
 
         void realloc(size_type n) { Kokkos::realloc(dview_m, n); }

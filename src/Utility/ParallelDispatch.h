@@ -14,6 +14,13 @@
 
 #include "Utility/IpplException.h"
 
+#include "Communicate/Communicator.h"
+#include "Communicate/Operations.h"
+namespace ippl {
+    namespace mpi {}
+    extern std::unique_ptr<mpi::Communicator> Comm;
+}  // namespace ippl
+
 namespace ippl {
     /*!
      * Wrapper type for Kokkos range policies with some convenience aliases
@@ -214,6 +221,35 @@ namespace ippl {
                 functor),
             reducer...);
     }
+    // clang-format off
+    #define DefineExprReduction(fun, name, op, MPI_Op)                                            \
+    template <typename E, size_t N>                                                               \
+    template <bool dummy>                                                                         \
+    typename detail::Expression<E, N>::template value_type_getter<dummy>::type                    \
+    detail::Expression<E, N>::name() const {                                                      \
+        using ret_t = typename detail::Expression<E, N>::template value_type_getter<dummy>::type; \
+        ret_t temp  = 0.0;                                                                        \
+        using index_array_type =                                                                  \
+            typename RangePolicy<Expression<E, N>::dim,                                           \
+                                 Kokkos::DefaultExecutionSpace>::index_array_type;                \
+        using capture_type = detail::CapturedExpression<E, N>;                                    \
+        capture_type expr_ = reinterpret_cast<const capture_type&>(*this);                        \
+        ippl::parallel_reduce(                                                                    \
+            "fun", getValidRange().value(),                                                       \
+            KOKKOS_LAMBDA(const index_array_type& args, ret_t& valL) {                            \
+                ret_t myVal = apply(expr_, args);                                                 \
+                op;                                                                               \
+            },                                                                                    \
+            Kokkos::fun<ret_t>(temp));                                                            \
+        ret_t globaltemp = 0.0;                                                                   \
+        Comm->allreduce(temp, globaltemp, 1, MPI_Op<ret_t>());                                    \
+        return globaltemp;                                                                        \
+    }
+    DefineExprReduction(Sum, sum, valL += myVal, std::plus)
+    DefineExprReduction(Max, max, if (myVal > valL) valL = myVal, std::greater)
+    DefineExprReduction(Min, min, if (myVal < valL) valL = myVal, std::less)
+    DefineExprReduction(Prod, prod, valL *= myVal, std::multiplies)
+    // clang-format on
 }  // namespace ippl
 
 #endif

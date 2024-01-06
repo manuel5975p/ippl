@@ -185,6 +185,9 @@ namespace ippl {
             const size_t shift = nghost_m - nghost;
             return getRangePolicy(dview_m, shift);
         }
+        auto validRangePolicy()const{
+            return getRangePolicy(this->getView());
+        }
 
         /*!
          * Print the BareField.
