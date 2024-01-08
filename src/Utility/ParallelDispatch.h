@@ -232,7 +232,7 @@ namespace ippl {
         using index_array_type =                                                                  \
             typename RangePolicy<Expression<E, N>::dim,                                           \
                                  Kokkos::DefaultExecutionSpace>::index_array_type;                \
-        using capture_type = detail::CapturedExpression<E, N>;                                    \
+        using capture_type = E;                                                                   \
         capture_type expr_ = reinterpret_cast<const capture_type&>(*this);                        \
         ippl::parallel_reduce(                                                                    \
             "fun", getValidRange().value(),                                                       \
