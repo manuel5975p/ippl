@@ -44,6 +44,7 @@
 #include "PoissonSolvers/PoissonCG.h"
 #include "PoissonSolvers/FFTOpenPoissonSolver.h"
 #include "Solver/FDTDSolver.h"
+#include <json.hpp>
 // #include "Solver/BoundaryDispatch.h"
 
 KOKKOS_INLINE_FUNCTION double sine(double n, double dt) {
@@ -172,7 +173,77 @@ void dumpVTK(ippl::Field<double, 3, ippl::UniformCartesian<double, 3>,
         }
     }
 }
+template<typename scalar, unsigned Dim>
+ippl::Vector<scalar, Dim> getVector(const nlohmann::json& j){
+    //assert(j.is_array());
+    
+    if(j.is_array()){
+        assert(j.size() == Dim);
+        ippl::Vector<scalar, Dim> ret;
+        for(unsigned i = 0;i < Dim;i++)
+            ret[i] = (scalar)j[i];
+        return ret;
+    }
+    else{
+        std::cerr << "Warning: Obtaining Vector from scalar json\n";
+        return ippl::Vector<scalar, Dim>((scalar)j);
+    }
+}
+template<size_t N, typename T>
+struct DefaultedStringLiteral {
+    constexpr DefaultedStringLiteral(const char (&str)[N], const T val) : value(val) {
+        std::copy_n(str, N, key);
+    }
+    
+    T value;
+    char key[N];
+};
 
+template<size_t N>
+struct StringLiteral {
+    constexpr StringLiteral(const char (&str)[N]) {
+        std::copy_n(str, N, value);
+    }
+    
+    char value[N];
+    constexpr DefaultedStringLiteral<N, int> operator>>(int t)const noexcept{
+        return DefaultedStringLiteral<N, int>(value, t);
+    }
+    constexpr size_t size()const noexcept{return N - 1;}
+};
+template<StringLiteral lit>
+constexpr size_t chash(){
+    size_t hash = 5381;
+    int c;
+
+    for(size_t i = 0;i < lit.size();i++){
+        c = lit.value[i];
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+
+    return hash;
+}
+size_t chash(const char* val) {
+    size_t hash = 5381;
+    int c;
+
+    while ((c = *val++)) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+
+    return hash;
+}
+size_t chash(const std::string& _val) {
+    size_t hash = 5381;
+    const char* val = _val.c_str();
+    int c;
+
+    while ((c = *val++)) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+
+    return hash;
+}
 template <unsigned Dim, typename _scalar = double>
 struct fdtd_initer {
     using s_t = ippl::FDTDSolver<_scalar, Dim>;
@@ -189,32 +260,41 @@ struct fdtd_initer {
     constexpr static unsigned dim = Dim;
     ippl::Vector<int, Dim> nr;
     ippl::Vector<scalar, Dim> hr;
+    ippl::Vector<scalar, Dim> extents;
     std::unique_ptr<Mesh_t> mesh;
     std::unique_ptr<ippl::FieldLayout<Dim>> layout;
+    nlohmann::json custom_options;
     typename s_t::Field_t::BConds_t m_ic_scalar_bcs;
     using Vector_t = typename s_t::Vector_t;
     private:
     size_t required_steps;
     size_t particle_count;
     public:
-    fdtd_initer(int N, size_t PC, scalar end_time) {
+    fdtd_initer(ippl::Vector<int, Dim> _res, ippl::Vector<_scalar, Dim> _ext, size_t PC, scalar end_time, const nlohmann::json& _opt) : extents(_ext), custom_options(_opt) {
         
         particle_count = PC;
         // domain
         ippl::NDIndex<Dim> owned;
-        nr = ippl::Vector<int, Dim>(N);
+        nr = _res;
+        scalar dt = _ext[0] / _res[0];
         for (unsigned i = 0; i < Dim; i++) {
             owned[i] = ippl::Index(nr[i]);
-            hr[i]    = 1.0 / nr[i];
+            hr[i]    = _ext[i] / _res[i];
+            dt = std::min(dt, hr[i]);
         }
 
         bool seed                        = false;
         ippl::Vector<scalar, Dim> origin = {0.0, 0.0, 0.0};
         mesh = std::make_unique<Mesh_t>(owned, hr, origin);
         const scalar c = 1.0;  // 299792458.0;
-        scalar dt      = (*std::min(hr.begin(), hr.end())) * 0.5 / c;
+        dt *= 0.5 / c;
+        if(custom_options.contains("timestep-ratio")){
+            dt *= (scalar)custom_options["timestep-ratio"];
+        }
         required_steps = std::ceil(end_time / dt);
+        
         dt = end_time / required_steps;
+        std::cout << "picking dt = " << dt << "\n";
         std::array<bool, Dim> isParallel;
         isParallel.fill(true);
         layout = std::make_unique<ippl::FieldLayout<Dim>>(MPI_COMM_WORLD, owned, isParallel);
@@ -227,37 +307,79 @@ struct fdtd_initer {
         radiation.initialize(*mesh, *layout);
         current.initialize(*mesh, *layout);
         current = 0.0;
-
+        ippl::FDTDParticleUpdateRule pur;
+        std::cerr << std::string(custom_options["bunch"]["update-rule"]["type"]) << "\n";
+        switch(chash(std::string(custom_options["bunch"]["update-rule"]["type"]))){
+            case chash<"circular-orbit">():
+                pur = ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT;
+            break;
+            case chash<"dipole-orbit">():
+                pur = ippl::FDTDParticleUpdateRule::DIPOLE_ORBIT;
+            break;
+            case chash<"lorentz">():
+                pur = ippl::FDTDParticleUpdateRule::LORENTZ;
+            break;
+            case chash<"stationary">():
+                pur = ippl::FDTDParticleUpdateRule::STATIONARY;
+            break;
+            default:
+                assert(false);
+                pur = ippl::FDTDParticleUpdateRule::XLINE;
+        }
         m_solver = std::make_unique<s_t>(rho, current, fieldE, fieldB, PC,
                                          ippl::FDTDBoundaryCondition::ABC_FALLAHI,
-                                         ippl::FDTDParticleUpdateRule::XLINE,
+                                         pur,
                                          ippl::FDTDFieldUpdateRule::DO, dt, seed, &radiation);
         setupBunch(PC);
         initialConditionPhi();
     }
     void setupBunch(size_t pc){
+        (void)pc;
         m_solver->bunch.setParticleBC(ippl::BC::PERIODIC);
-        auto srview=    m_solver->bunch.R.getView();
+
+        //Not required, since done by m_solver constructor
+        //m_solver->bunch.create(pc);
+        auto srview   = m_solver->bunch.R.getView();
         auto srn1view = m_solver->bunch.R_nm1.getView();
         auto gbrview  = m_solver->bunch.gamma_beta.getView();
+
+        Vector_t bunchpos     = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["position"]);// + extents * 0.5; //Mithra is centered
+        Vector_t direction    = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["direction"]);
+        Vector_t pos_var      = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["sigma-position"]);
+        Vector_t momentum_var = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["sigma-momentum"]);
+        Kokkos::Random_XorShift64_Pool<> rand_pool(12345);
+        scalar dt = m_solver->dt;
         Kokkos::parallel_for(
             Kokkos::RangePolicy<
                 typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(
                 0, m_solver->bunch.getLocalNum()),
-            // generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
-            //     solver.bunch.R.getView(),
-            //     solver.bunch.R_nm1.getView(),
-            //     solver.bunch.gamma_beta.getView(),
-            //     regions_view(ippl::Comm->rank()),
-            //     rand_pool
-            //)
-            KOKKOS_LAMBDA(size_t idx) {
-                srview(idx) =
-                    ippl::Vector<scalar, Dim>{(idx) / scalar(pc), 0.5, 0.5};
-                srn1view(idx) =
-                    ippl::Vector<scalar, Dim>{(idx) / scalar(pc), 0.5, 0.5};
-                gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
-            });
+                KOKKOS_LAMBDA(size_t idx){
+                    auto state = rand_pool.get_state();
+                    Vector_t gammabeta;
+                    for(unsigned i = 0;i < Dim;i++){
+                        srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
+                        const scalar gammabeta_i = state.normal(bunchpos[i], pos_var[i]) * direction[i];
+                        gbrview(idx)[i] = gammabeta_i;
+                        gammabeta[i] = gammabeta_i;
+                    }
+                    srn1view(idx) = srview(idx) - dt * gammabeta / (sqrt(1.0 + dot_prod(gammabeta, gammabeta)));
+                    rand_pool.free_state(state);
+                }
+                // generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
+                //     solver.bunch.R.getView(),
+                //     solver.bunch.R_nm1.getView(),
+                //     solver.bunch.gamma_beta.getView(),
+                //     regions_view(ippl::Comm->rank()),
+                //     rand_pool
+                //)
+                //KOKKOS_LAMBDA(size_t idx) {
+                //    srview(idx) =
+                //        ippl::Vector<scalar, Dim>{(idx) / scalar(pc), 0.5, 0.5};
+                //    srn1view(idx) =
+                //        ippl::Vector<scalar, Dim>{(idx) / scalar(pc), 0.5, 0.5};
+                //    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
+                //}
+            );
         Kokkos::fence();
     }
     void initialConditionPhi() {
@@ -292,16 +414,44 @@ struct fdtd_initer {
         }
         Kokkos::deep_copy(m_solver->phiN_m.getView(), phi_ic.getView());
         Kokkos::deep_copy(m_solver->phiNm1_m.getView(), phi_ic.getView());
-        ippl::Vector<ippl::FDTDBoundaryCondition, Dim> fdtdbcs(ippl::FDTDBoundaryCondition::ABC_MUR);
-        fdtdbcs[0] = ippl::FDTDBoundaryCondition::PERIODIC;
-        m_solver->setBoundaryConditions(fdtdbcs);
+        //ippl::Vector<ippl::FDTDBoundaryCondition, Dim> fdtdbcs(ippl::FDTDBoundaryCondition::ABC_MUR);
+        //fdtdbcs[0] = ippl::FDTDBoundaryCondition::PERIODIC;
+        //m_solver->setBoundaryConditions(fdtdbcs);
     }
     void doRequiredSteps(){
+        std::unique_ptr<std::ofstream> brad;
+        if(custom_options["output"].contains("track")){
+            //std::cerr << "contains track\n";
+            if(custom_options["output"]["track"].contains("radiation")){
+                brad = std::make_unique<std::ofstream>("boundary_radation.txt");
+                m_solver->output_stream[ippl::trackableOutput::boundaryRadiation] = brad.get();
+                //std::cerr << "Added boundaryradiation tracker\n";
+            }
+        }
         for (unsigned int it = 0; it < required_steps; ++it){
             m_solver->solve();
             //std::cout << ippl::Info->getOutputLevel() << "\n";
-            if(ippl::Info->getOutputLevel() == 5 && (it % (required_steps / 20)) == 0){
-                dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+            size_t count = 50;
+            if(custom_options.contains("output") && custom_options["output"].contains("count")){
+                count = custom_options["output"]["count"];
+            }
+            auto rsteps = std::max((size_t)1, (required_steps / std::max(1ul, count)));
+            if(count && ippl::Info->getOutputLevel() == 5 && (it % rsteps) == 0){
+                switch(chash(custom_options["output"]["type"])){
+                    case chash<"B">():
+                    case chash<"magnet">():
+                    case chash<"magnetic">():
+                    dumpVTK(fieldB, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                    break;
+                    case chash<"E">():
+                    case chash<"electric">():
+                    dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                    break;
+                    case chash<"rad">():
+                    case chash<"radiation">():
+                    dumpVTK(radiation, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                    break;
+                }
             }
         }
         evaluation();
@@ -340,18 +490,77 @@ struct fdtd_initer {
             ostr << dist << " " << bmag << "\n";
         }
 
+    }   
+};
+
+template <char... C> 
+constexpr StringLiteral<sizeof...(C)> operator "" _option(){
+    return StringLiteral<sizeof...(C)>({C...});
+}
+/*template<size_t N>
+DefaultedStringLiteral<N, int> operator>>(const char (&str)[N], int t){
+    return DefaultedStringLiteral<N, int>(str, t);
+}*/
+template<size_t Index, DefaultedStringLiteral... lits>
+struct options_imp;
+template<size_t Index, DefaultedStringLiteral lit1, DefaultedStringLiteral lit2, DefaultedStringLiteral... lits>
+struct options_imp<Index, lit1, lit2, lits...>{
+    constexpr static DefaultedStringLiteral value = lit1;
+    constexpr static size_t index = Index;
+    using next = options_imp<Index + 1, lit2, lits...>;
+    template<size_t I>
+    constexpr static auto get(){
+        if constexpr(I == Index){
+            return value;
+        }
+        else if constexpr(I > Index){
+            return next::template get<I>();
+        }
     }
 };
+template<size_t Index, DefaultedStringLiteral lit>
+struct options_imp<Index, lit>{
+    constexpr static size_t index = Index;
+};
+template<DefaultedStringLiteral... lit>
+struct options{
+    using datatype = options_imp<0, lit...>;
+    options(){
+        //auto values = {lit...};
+    }
+};
+template<DefaultedStringLiteral L>
+struct P{
+    P(){
+        std::cout << L.value << "\n";
+    }
+};
+
+auto jdefault(const nlohmann::json& v, const std::string& k, auto dv){
+    if(v.contains(k)){
+        return decltype(dv)(v[k]);
+    }
+    std::cerr << "Defaulting option " << k << " to " << dv << "\n";
+    return dv;
+}
 
 int main(int argc, char* argv[]){
     ippl::initialize(argc, argv);
     {
+        //options<("mesh-lengths"_option)> option_getter;
+        //std::cout << decltype(option_getter)::datatype::get<0>().value << "\n";
+        std::ifstream cfile("config.json");
+        nlohmann::json j;
+        cfile >> j;
         constexpr unsigned Dim = 3;
-        int N = 30;
-        if(argc > 1){
-            N = std::atoi(argv[1]);
-        }
-        fdtd_initer<Dim> fdtd(N, N * 10, 15.0);
+
+        ippl::Vector<int, Dim> res = getVector<int, Dim>(j["mesh"]["resolution"]);
+        ippl::Vector<double, Dim> ext = ippl::Vector<double, 3>{j["mesh"]["extents"][0], j["mesh"]["extents"][1], j["mesh"]["extents"][2]};
+        size_t pc = j["bunch"]["bunch-initialization"]["number-of-particles"];
+        double time = j["mesh"]["total-time"];
+        std::cerr << "Res: " << res << "\n";
+        std::cerr << "Ext: " << ext << "\n";
+        fdtd_initer<Dim> fdtd(res, ext, pc, time, j);
         fdtd.doRequiredSteps();
     }
     ippl::finalize();

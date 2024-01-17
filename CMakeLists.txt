@@ -59,6 +59,12 @@ if (ENABLE_FFT)
     message (STATUS "Found Heffte_DIR: ${Heffte_DIR}")
 endif ()
 
+file(
+    DOWNLOAD
+    https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+    "${CMAKE_BINARY_DIR}/nlohmann_json_download/json.hpp"
+)
+include_directories("${CMAKE_BINARY_DIR}/nlohmann_json_download/")
 option (ENABLE_SOLVERS "Enable IPPL solvers" OFF)
 
 add_subdirectory (src)
