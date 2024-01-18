@@ -871,7 +871,7 @@ namespace ippl {
                 assert(abs<double>(dot_prod(tnbv(i), tnbv(i)) - 1.0) < 1e-10);
             },
             radiation_on_boundary);
-        radiation_on_boundary *= 4.0 * M_PI * 0.5 * 0.5 / tracer_bunch.getLocalNum();
+        radiation_on_boundary *= 4.0 * M_PI * 0.3 * 0.3 / tracer_bunch.getLocalNum();
         if (output_stream.contains(trackableOutput::boundaryRadiation)) {
             *(output_stream.at(trackableOutput::boundaryRadiation))
                 << this->dt * iteration << " " << radiation_on_boundary << "\n";
