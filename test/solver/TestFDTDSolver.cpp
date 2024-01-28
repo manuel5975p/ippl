@@ -244,6 +244,54 @@ size_t chash(const std::string& _val) {
 
     return hash;
 }
+template<typename view_value_type>
+Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_value_type*> src_view, size_t locsize){
+    //return Kokkos::View<view_value_type*>("", 0);
+    size_t local_field_size = locsize;
+    std::vector<size_t> field_sizes(ippl::Comm->size(), 0);
+
+    //std::cout << "pg" << std::endl;// Gather the counts of data from all processes to the root
+    MPI_Gather(&local_field_size, 1, MPI_UNSIGNED_LONG, field_sizes.data(), 1, MPI_UNSIGNED_LONG, 0, ippl::Comm->getCommunicator());
+    //if(!ippl::Comm->rank()){
+    //    size_t ts = 0;
+    //    for(auto fs : field_sizes)ts += fs;
+    //    LOG("Total: " << ts);
+    //}
+    
+    //std::cout << "ag" << std::endl;
+    typename Kokkos::View<view_value_type*>::host_mirror_type hmirror = Kokkos::create_mirror_view(src_view);
+    std::vector<view_value_type> local_view_dump(local_field_size);
+    for(size_t i = 0;i < local_field_size;i++){
+        local_view_dump[i] = hmirror[i];
+    }
+    std::vector<int> rcnts(ippl::Comm->size());
+    std::vector<int> displs(ippl::Comm->size());
+    std::vector<view_value_type> complete_field_collection;
+    size_t total_field_size_on_rank_0 = 0;
+    if(ippl::Comm->rank() == 0){
+        int displ = 0;
+        for(size_t i = 0;i < field_sizes.size();i++){
+            total_field_size_on_rank_0 += field_sizes[i];
+            displs[i] = displ;
+            rcnts[i] = field_sizes[i] * sizeof(view_value_type);
+            displ += field_sizes[i] * sizeof(view_value_type);
+        }
+            
+        complete_field_collection.resize(total_field_size_on_rank_0);
+    }
+    MPI_Gatherv(local_view_dump.data(), local_view_dump.size() * sizeof(view_value_type), MPI_CHAR, complete_field_collection.data(), rcnts.data(), displs.data(), MPI_CHAR, 0, ippl::Comm->getCommunicator());
+    Kokkos::View<view_value_type*> ret("", complete_field_collection.size());
+    typename Kokkos::View<view_value_type*>::host_mirror_type ret_hmirror("", complete_field_collection.size());
+    if(ippl::Comm->rank() == 0){
+        for(size_t i = 0;i < complete_field_collection.size();i++){
+            ret_hmirror(i) = complete_field_collection[i];
+        }
+        Kokkos::deep_copy(ret, ret_hmirror);
+    }
+    
+    return ret;
+
+}
 template <unsigned Dim, typename _scalar = double>
 struct fdtd_initer {
     using s_t = ippl::FDTDSolver<_scalar, Dim>;
@@ -308,7 +356,8 @@ struct fdtd_initer {
         current.initialize(*mesh, *layout);
         current = 0.0;
         ippl::FDTDParticleUpdateRule pur;
-        std::cerr << std::string(custom_options["bunch"]["update-rule"]["type"]) << "\n";
+        ippl::FDTDFieldUpdateRule fur;
+        //std::cerr << std::string(custom_options["bunch"]["update-rule"]["type"]) << "\n";
         switch(chash(std::string(custom_options["bunch"]["update-rule"]["type"]))){
             case chash<"circular-orbit">():
                 pur = ippl::FDTDParticleUpdateRule::CIRCULAR_ORBIT;
@@ -326,12 +375,46 @@ struct fdtd_initer {
                 assert(false);
                 pur = ippl::FDTDParticleUpdateRule::XLINE;
         }
+        switch(chash(std::string(custom_options["field"]["update-rule"]))){
+            case chash<"do">():
+                fur = ippl::FDTDFieldUpdateRule::DO;
+            break;
+            case chash<"dont">():
+            case chash<"don't">():
+                fur = ippl::FDTDFieldUpdateRule::DONT;
+            break;
+            default:
+                assert(false);
+                fur = ippl::FDTDFieldUpdateRule::DO;
+        }
+
         m_solver = std::make_unique<s_t>(rho, current, fieldE, fieldB, PC,
                                          ippl::FDTDBoundaryCondition::ABC_FALLAHI,
                                          pur,
-                                         ippl::FDTDFieldUpdateRule::DO, dt, seed, &radiation);
+                                         fur, dt, seed, &radiation);
         setupBunch(PC);
         initialConditionPhi();
+
+        //initialConditionA();
+        m_solver->setBoundaryConditions(ippl::Vector<ippl::FDTDBoundaryCondition, 3>(ippl::FDTDBoundaryCondition::ABC_FALLAHI));
+    }
+    void initialConditionA(){
+        auto av = m_solver->aN_m.getView();
+        auto am1v = m_solver->aNm1_m.getView();
+        auto& layout = m_solver->layout_mp;
+        const ippl::NDIndex<Dim> lDom       = layout->getLocalNDIndex();
+        auto nr = this->nr;
+        auto extents = this->extents;
+        const unsigned nghost = m_solver->aN_m.getNghost();
+        double strength = custom_options["field"]["strength"];
+        Kokkos::parallel_for(ippl::getRangePolicy(av), KOKKOS_LAMBDA(size_t i, size_t j, size_t k){
+            ippl::Vector<size_t, 3> args = ippl::Vector<size_t, 3>{i, j, k} - lDom.first() + nghost;
+            av(i, j, k) =   ippl::Vector<scalar, 3>{scalar(0), scalar(args[2]) / nr[2] * extents[2] * (scalar)strength, scalar(0)};
+            av(i, j, k) =   ippl::Vector<scalar, 3>(0.0);
+            am1v(i, j, k) = ippl::Vector<scalar, 3>{scalar(0), scalar(args[2]) / nr[2] * extents[2] * (scalar)strength, scalar(0)};
+            //am1v(i, j, k) = ippl::Vector<scalar, 3>{scalar(0), scalar(args[2]) / nr[2] * extents[2] * (scalar)strength, scalar(0)};
+            am1v(i, j, k) =   ippl::Vector<scalar, 3>(0.0);
+        });
     }
     void setupBunch(size_t pc){
         (void)pc;
@@ -347,6 +430,10 @@ struct fdtd_initer {
         Vector_t direction    = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["direction"]);
         Vector_t pos_var      = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["sigma-position"]);
         Vector_t momentum_var = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["sigma-momentum"]);
+        Vector_t gamma_means  = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["particle-gammabetas"]);
+
+        double externalStrength = custom_options["field"]["strength"];
+        m_solver->externalMagneticScale = externalStrength;
         Kokkos::Random_XorShift64_Pool<> rand_pool(12345);
         scalar dt = m_solver->dt;
         Kokkos::parallel_for(
@@ -354,11 +441,14 @@ struct fdtd_initer {
                 typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(
                 0, m_solver->bunch.getLocalNum()),
                 KOKKOS_LAMBDA(size_t idx){
+                    using Kokkos::sqrt;
                     auto state = rand_pool.get_state();
                     Vector_t gammabeta;
                     for(unsigned i = 0;i < Dim;i++){
                         srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
-                        const scalar gammabeta_i = state.normal(bunchpos[i], pos_var[i]) * direction[i];
+                        const scalar gammabeta_i = state.normal(gamma_means[i], momentum_var[i]) * direction[i];
+                        //const scalar gammabeta_i = sqrt(gamma_i * gamma_i - 1.0);
+                        //std::cout << gammabeta_i << " GAMA\n";
                         gbrview(idx)[i] = gammabeta_i;
                         gammabeta[i] = gammabeta_i;
                     }
@@ -386,6 +476,8 @@ struct fdtd_initer {
         
         auto& ic_scalar_bcs = m_ic_scalar_bcs;
         const auto hr = this->hr;
+
+        m_solver->pl.update(m_solver->bunch);
         m_solver->bunch.Q.scatterVolumetricallyCorrect(rho, m_solver->bunch.R);
         auto bcsetter_single = [&ic_scalar_bcs, hr]<size_t Idx>(const std::index_sequence<Idx>&) {
             ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
@@ -420,11 +512,25 @@ struct fdtd_initer {
     }
     void doRequiredSteps(){
         std::unique_ptr<std::ofstream> brad;
-        if(custom_options["output"].contains("track")){
+        std::unique_ptr<std::ofstream> crad;
+        std::unique_ptr<std::ofstream> lrad;
+        std::unique_ptr<std::ofstream> pp0;
+        
+        
+        if(ippl::Comm->rank() == 0 && custom_options["output"].contains("track")){
             //std::cerr << "contains track\n";
             if(custom_options["output"]["track"].contains("radiation")){
-                brad = std::make_unique<std::ofstream>("boundary_radation.txt");
+                brad = std::make_unique<std::ofstream>((std::string)custom_options["output"]["track"]["radiation"]);
                 m_solver->output_stream[ippl::trackableOutput::boundaryRadiation] = brad.get();
+            }
+            if(custom_options["output"]["track"].contains("cumulative-radiation")){
+                crad = std::make_unique<std::ofstream>((std::string)custom_options["output"]["track"]["cumulative-radiation"]);
+                m_solver->output_stream[ippl::trackableOutput::cumulativeRadiation] = crad.get();
+                //std::cerr << "Added boundaryradiation tracker\n";
+            }
+            if(custom_options["output"]["track"].contains("particle-position")){
+                pp0 = std::make_unique<std::ofstream>((std::string)custom_options["output"]["track"]["particle-position"]);
+                m_solver->output_stream[ippl::trackableOutput::p0pos] = pp0.get();
                 //std::cerr << "Added boundaryradiation tracker\n";
             }
         }
@@ -457,6 +563,7 @@ struct fdtd_initer {
         evaluation();
     }
     void evaluation(){
+        return;
         typename s_t::tracer_bunch_type eval(m_solver->pl);
         const auto pc = this->particle_count;
         eval.create(pc);
@@ -547,13 +654,26 @@ auto jdefault(const nlohmann::json& v, const std::string& k, auto dv){
 int main(int argc, char* argv[]){
     ippl::initialize(argc, argv);
     {
+        //lorentz_frame<double>  frame(ippl::Vector<double, 3>{0.5,0.7,0.9});
+        //lorentz_frame<double> iframe(ippl::Vector<double, 3>{-0.5,-0.7,-0.9});
+        //matrix<double, 4, 4> lorenz  =  frame.unprimedToPrimed();
+        //matrix<double, 4, 4> lorenz2 = iframe.primedToUnprimed();
+        //std::cout << lorenz << "\n\n";
+        //std::cout << lorenz2 << "\n";
+        //using vec3 = ippl::Vector<double, 3>;
+        //Kokkos::pair<ippl::Vector<double, 3>, ippl::Vector<double, 3>> eb;
+        //eb.first = vec3(0);
+        //eb.second = vec3{0,0,1};
+        //std::cout << frame.transform_EB(eb).first << "\n";
+
+        //lorenz.inverse();
+
         //options<("mesh-lengths"_option)> option_getter;
         //std::cout << decltype(option_getter)::datatype::get<0>().value << "\n";
         std::ifstream cfile("config.json");
         nlohmann::json j;
         cfile >> j;
         constexpr unsigned Dim = 3;
-
         ippl::Vector<int, Dim> res = getVector<int, Dim>(j["mesh"]["resolution"]);
         ippl::Vector<double, Dim> ext = ippl::Vector<double, 3>{j["mesh"]["extents"][0], j["mesh"]["extents"][1], j["mesh"]["extents"][2]};
         size_t pc = j["bunch"]["bunch-initialization"]["number-of-particles"];

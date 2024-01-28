@@ -115,7 +115,7 @@ namespace ippl {
         DONT, DO
     };
     enum struct trackableOutput{
-        boundaryRadiation, p0pos
+        boundaryRadiation, cumulativeRadiation, p0pos
     };
 
     template <typename Tfields, unsigned Dim, class M = UniformCartesian<double, Dim>,
@@ -207,6 +207,9 @@ namespace ippl {
         playout_type pl;
         bunch_type bunch;
         tracer_bunch_type tracer_bunch;
+
+
+        double externalMagneticScale;
         double total_energy;
         double absorbed__energy;
         // buffer for communication

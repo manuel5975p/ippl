@@ -146,6 +146,10 @@ namespace ippl {
         template <typename Field, typename P2>
         void gather(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp);
 
+        template <typename Function, typename TParticleAttrib>
+            requires(std::is_convertible_v<std::invoke_result_t<Function, typename TParticleAttrib::value_type>, T>)
+        void gatherExternalField(Function f, const TParticleAttrib& pp);
+
         T sum();
         T max();
         T min();

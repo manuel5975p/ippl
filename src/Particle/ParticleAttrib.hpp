@@ -260,6 +260,24 @@ namespace ippl {
         IpplTimings::stopTimer(gatherTimer);
     }
     template <typename T, class... Properties>
+    template <typename Function, typename TParticleAttrib>
+        requires(std::is_convertible_v<std::invoke_result_t<Function, typename TParticleAttrib::value_type>, T>)
+    void ParticleAttrib<T, Properties...>::gatherExternalField(Function f, const TParticleAttrib& pp){
+        static IpplTimings::TimerRef gatherTimer = IpplTimings::getTimer("gather");
+        IpplTimings::startTimer(gatherTimer);
+
+        Kokkos::parallel_for(
+            "ParticleAttrib::gather", *(this->localNum_mp),
+            KOKKOS_CLASS_LAMBDA(const size_t idx) {
+                // find nearest grid point
+                T l = f(pp(idx));
+
+
+                // gather
+                dview_m(idx) += l;
+            });
+    }
+    template <typename T, class... Properties>
     template <typename Field, typename P2>
     void ParticleAttrib<T, Properties...>::scatterVolumetricallyCorrect(
         Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp) const {

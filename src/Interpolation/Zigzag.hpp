@@ -47,6 +47,10 @@ namespace ippl {
             using Kokkos::floor;
             return x - floor(x);
         }
+        template<typename T>
+        KOKKOS_INLINE_FUNCTION T absdiff(T firstSize, T secondSize) {
+            return (firstSize >= secondSize) ? T(firstSize - secondSize) : T(secondSize - firstSize);
+        }
         template <unsigned long... ScatterPoint, typename T, unsigned Dim, typename IndexType>
         KOKKOS_INLINE_FUNCTION void ZigzagScatterToField(
             const std::index_sequence<ScatterPoint...>&,
@@ -70,7 +74,10 @@ namespace ippl {
                 to_in_grid_coordinates[i]   = to[i] / hr[i];
                 fromi[i]                    = floor(from_in_grid_coordinates[i]) + nghost;
                 toi[i]                      = floor(to_in_grid_coordinates[i]) + nghost;
+
+                if(absdiff(fromi[i], toi[i]) > 3)return;
             }
+
             ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
             ippl::Vector<IndexType, Dim> toi_local   = toi - lDom.first();
 
