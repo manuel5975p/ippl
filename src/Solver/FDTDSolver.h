@@ -28,6 +28,265 @@
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
 
+constexpr double electron_charge = 1.0;
+constexpr double electron_mass = 1.0;
+template <typename T>
+T squaredNorm(const ippl::Vector<T, 3>& a) {
+    return a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+}
+template <typename T>
+auto sq(T x) {
+    return x * x;
+}
+template <typename... Args>
+void castToVoid(Args&&... args) {
+    (void)(std::tuple<Args...>{args...});
+}
+#define CAST_TO_VOID(...) castToVoid(__VA_ARGS__)
+template <typename T, unsigned Dim>
+T dot_prod(const ippl::Vector<T, Dim>& a, const ippl::Vector<T, Dim>& b) {
+    T ret = 0.0;
+    for (unsigned i = 0; i < Dim; i++) {
+        ret += a[i] * b[i];
+    }
+    return ret;
+}
+template <typename T>
+KOKKOS_INLINE_FUNCTION ippl::Vector<T, 3> cross_prod(const ippl::Vector<T, 3>& a,
+                                                     const ippl::Vector<T, 3>& b) {
+    ippl::Vector<T, 3> ret{0.0, 0.0, 0.0};
+    ret[0] = a[1] * b[2] - a[2] * b[1];
+    ret[1] = a[2] * b[0] - a[0] * b[2];
+    ret[2] = a[0] * b[1] - a[1] * b[0];
+    return ret;
+}
+/**
+ * @brief Compiletime-sized matrix type
+ * 
+ * @tparam T Scalar
+ * @tparam m Rows
+ * @tparam n Columns
+ */
+template<typename T, int m, int n>
+struct matrix{
+    /**
+     * @brief Column major
+     * 
+     */
+    ippl::Vector<ippl::Vector<T, m>, n> data;
+    constexpr static bool squareMatrix = (m == n && m > 0);
+
+    constexpr KOKKOS_INLINE_FUNCTION matrix(T diag)
+    requires(m == n){
+        for(unsigned i = 0;i < n;i++){
+            for(unsigned j = 0;j < n;j++){
+                data[i][j] = diag * T(i == j);
+            }
+        }
+    }
+    constexpr KOKKOS_INLINE_FUNCTION matrix() = default;
+    KOKKOS_INLINE_FUNCTION constexpr static matrix zero(){
+        matrix<T, m, n> ret;
+        for(unsigned i = 0;i < n;i++){
+            for(unsigned j = 0;j < n;j++){
+                ret.data[i][j] = 0;
+            }
+        }
+        return ret;
+    };
+
+    KOKKOS_INLINE_FUNCTION T operator()(int i, int j)const noexcept{
+        return data[j][i];
+    }
+    KOKKOS_INLINE_FUNCTION T& operator()(int i, int j)noexcept{
+        return data[j][i];
+    }
+
+    KOKKOS_INLINE_FUNCTION matrix<T, m, n> operator+(const matrix<T, m, n>& other) const {
+        matrix<T, m, n> result;
+        for (int i = 0; i < n; ++i) {
+            result.data[i] = data[i] + other.data[i];
+        }
+        return result;
+    }
+
+    // Implement matrix subtraction
+    KOKKOS_INLINE_FUNCTION matrix<T, m, n> operator-(const matrix<T, m, n>& other) const {
+        matrix<T, m, n> result;
+        for (int i = 0; i < n; ++i) {
+            result.data[i] = data[i] - other.data[i];
+        }
+        return result;
+    }
+
+    // Implement matrix-vector multiplication
+    template<unsigned int other_m>
+    KOKKOS_INLINE_FUNCTION ippl::Vector<T, m> operator*(const ippl::Vector<T, other_m>& vec) const {
+        static_assert((int)other_m == n);
+        ippl::Vector<T, m> result;
+        for (int i = 0; i < n; ++i) {
+            result += vec[i] * data[i];
+        }
+        return result;
+    }
+    template<int otherm, int othern>
+        requires(n == otherm)
+    KOKKOS_INLINE_FUNCTION matrix<T, m, othern> operator*(const matrix<T, otherm, othern>& otherMat) const noexcept {
+        matrix<T, m, othern> ret(0);
+        for(int i = 0;i < m;i++){
+            for(int j = 0;j < othern;j++){
+                for(int k = 0;k < n;k++){
+                    ret(i, j) += (*this)(i, k) * otherMat(k, j);
+                }
+            }
+        }
+        return ret;
+    }
+    KOKKOS_INLINE_FUNCTION void addCol(int i, int j, T alpha = 1.0){
+        data[j] += data[i] * alpha;
+    }
+    KOKKOS_INLINE_FUNCTION matrix<T, m, n> inverse()const noexcept
+        requires (squareMatrix){
+        constexpr int N = m;
+        
+        matrix<T, m, n> ret(1.0);
+        matrix<T, m, n> dis(*this);
+
+        for(int i = 0;i < N;i++){
+            for(int j = i + 1;j < N;j++){
+                T alpha = -dis(i, j) / dis(i, i);
+                dis.addCol(i, j, alpha);
+                dis(i, j) = 0;
+                ret.addCol(i, j, alpha);
+            }
+        }
+        for(int i = N - 1;i >= 0;i--){
+            for(int j = i - 1;j >= 0;j--){
+                T alpha = -dis(i, j) / dis(i, i);
+                dis.addCol(i, j, alpha);
+                dis(i, j) = 0;
+                ret.addCol(i, j, alpha);
+            }
+        }
+        for(int i = 0;i < N;i++){
+            T d = dis(i, i);
+            T oneod = T(1) / d;
+            dis.data[i] *= oneod;
+            ret.data[i] *= oneod;
+        }
+
+        return ret;
+    }
+    
+    template<typename stream_t>
+    friend stream_t& operator<<(stream_t& str, const matrix<T, m, n>& mat){
+        for(int i = 0;i < m;i++){
+            for(int j = 0;j < n;j++){
+                str << mat.data[j][i] << " ";
+            }
+            str << "\n";
+        }
+        return str;
+    }
+};
+template<typename T, unsigned N>
+ippl::Vector<T, N> vscale(const ippl::Vector<T, N>& v, T alpha){
+    ippl::Vector<T, N> ret;
+    for(unsigned i = 0;i < N;i++){
+        ret[i] = v[i] * alpha;
+    }
+    return ret;
+}
+template<typename scalar>
+KOKKOS_INLINE_FUNCTION ippl::Vector<scalar, 4> prepend_t(const ippl::Vector<scalar, 3>& x, scalar t = 0){
+    return ippl::Vector<scalar, 4>{t, x[0], x[1], x[2]};
+}
+template<typename scalar>
+KOKKOS_INLINE_FUNCTION ippl::Vector<scalar, 3> strip_t(const ippl::Vector<scalar, 4>& x){
+    return ippl::Vector<scalar, 3>{x[1], x[2], x[3]};
+}
+template<typename T>
+struct LorentzFrame{
+    constexpr static T c = 1.0;
+    using scalar = T;
+    using Vector3 = ippl::Vector<T, 3>;
+    ippl::Vector<T, 3> beta_m;
+    ippl::Vector<T, 3> gammaBeta_m;
+    T gamma_m;
+    KOKKOS_INLINE_FUNCTION LorentzFrame(const ippl::Vector<T, 3>& gammaBeta){
+        using Kokkos::sqrt;
+        beta_m = gammaBeta / Kokkos::sqrt(1 + dot_prod(gammaBeta, gammaBeta));
+        gamma_m = Kokkos::sqrt(1 + dot_prod(gammaBeta, gammaBeta));
+        gammaBeta_m = gammaBeta;
+    }
+    template<char axis>
+    static LorentzFrame uniaxialGamma(T gamma){
+        static_assert(axis == 'x' || axis == 'y' || axis == 'z', "Only xyz axis suproted");
+        assert(gamma >= 1.0 && "Gamma must be >= 1");
+        using Kokkos::sqrt;
+        
+        T beta = sqrt(gamma * gamma - 1) / gamma;
+        Vector3 arg{0,0,0};
+        arg[axis - 'x'] = gamma * beta;
+        return LorentzFrame<T>(arg);
+    }
+    KOKKOS_INLINE_FUNCTION matrix<T, 4, 4> unprimedToPrimed()const noexcept{
+        T betaMagsq = dot_prod(beta_m, beta_m);
+        using Kokkos::abs;
+        if(abs(betaMagsq) < 1e-8){
+            return matrix<T, 4, 4>(T(1));
+        }
+        ippl::Vector<T, 3> betaSquared = beta_m * beta_m;
+
+        matrix<T, 4, 4> ret;
+
+        ret.data[0] = ippl::Vector<T, 4>{ gamma_m, -gammaBeta_m[0], -gammaBeta_m[1], -gammaBeta_m[2]};
+        ret.data[1] = ippl::Vector<T, 4>{-gammaBeta_m[0], 1 + (gamma_m - 1) * betaSquared[0] / betaMagsq, (gamma_m - 1) * beta_m[0] * beta_m[1] / betaMagsq, (gamma_m - 1) * beta_m[0] * beta_m[2] / betaMagsq};
+        ret.data[2] = ippl::Vector<T, 4>{-gammaBeta_m[1], (gamma_m - 1) * beta_m[0] * beta_m[1] / betaMagsq, 1 + (gamma_m - 1) * betaSquared[1] / betaMagsq, (gamma_m - 1) * beta_m[1] * beta_m[2] / betaMagsq};
+        ret.data[3] = ippl::Vector<T, 4>{-gammaBeta_m[2], (gamma_m - 1) * beta_m[0] * beta_m[2] / betaMagsq, (gamma_m - 1) * beta_m[1] * beta_m[2] / betaMagsq, 1 + (gamma_m - 1) * betaSquared[2] / betaMagsq};
+
+        return ret;
+    }
+    KOKKOS_INLINE_FUNCTION matrix<T, 4, 4> primedToUnprimed()const noexcept{
+        return unprimedToPrimed().inverse();
+    }
+
+    KOKKOS_INLINE_FUNCTION Vector3 transformV(const Vector3& unprimedV)const noexcept{
+        T factor = T(1.0) / (1.0 - dot_prod(unprimedV, beta_m));
+        Vector3 ret = vscale(unprimedV, 1.0 / gamma_m);
+        ret -= beta_m;
+        ret += vscale(beta_m, dot_prod(unprimedV, beta_m) * (gamma_m / (gamma_m + 1)));
+        return vscale(ret, factor);
+    }
+    KOKKOS_INLINE_FUNCTION Vector3 transformGammabeta(const Vector3& gammabeta)const noexcept{
+        using Kokkos::sqrt;
+        T gamma = sqrt(T(1) + dot_prod(gammabeta, gammabeta));
+        Vector3 beta = gammabeta;
+        beta /= gamma;
+        Vector3 betatrf = transformV(beta);
+        betatrf *= sqrt(1 - dot_prod(betatrf, betatrf));
+        return betatrf;
+    }
+
+    KOKKOS_INLINE_FUNCTION Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> transform_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& unprimedEB)const noexcept{
+        using Kokkos::sqrt;
+        Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> ret;
+        Vector3 vnorm = vscale(beta_m, (1.0 / sqrt(dot_prod(beta_m, beta_m))));
+        ret.first  = (unprimedEB.first  + vscale(cross_prod(beta_m, unprimedEB.second), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.first,  vnorm))));
+        ret.second = (unprimedEB.second - vscale(cross_prod(beta_m, unprimedEB.first ), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.second, vnorm))));
+        return ret;
+    }
+    //Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> transform_inverse_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& primedEB)const noexcept{
+    //    using Kokkos::sqrt;
+    //    Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> ret;
+    //    Vector3 vnorm = beta_m * (1.0 / sqrt(dot_prod(beta_m, beta_m)));
+    //    ret.first  = (primedEB.first - cross_prod(beta_m, primedEB.second))*gamma - (gamma_m - 1) * (dot_prod(primedEB.first, vnorm) * vnorm);
+    //    ret.second = (primedEB.second + cross_prod(beta_m, primedEB.first))*gamma - (gamma_m - 1) * (dot_prod(primedEB.second, vnorm) * vnorm);
+    //    return ret;
+    //}
+};
+
+
 template <typename _scalar, class PLayout>
 struct  Bunch : public ippl::ParticleBase<PLayout> {
     using scalar = _scalar;
@@ -106,6 +365,15 @@ namespace ippl {
         ABC_FALLAHI,
         PERIODIC
     };
+    template<typename scalar>
+    struct undulator_parameters{
+        scalar lambda; //MITHRA: lambda_u
+        scalar B_magnitude;
+        scalar K; //Undulator parameter
+        undulator_parameters(scalar K_undulator_parameter, scalar lambda_u) : lambda(lambda_u), K(K_undulator_parameter){
+            B_magnitude = (2 * M_PI * electron_mass * K) / (electron_charge * lambda_u);
+        }
+    };
 
     //TODO: Maybe switch to std::function
     enum struct FDTDParticleUpdateRule{
@@ -137,7 +405,7 @@ namespace ippl {
         //using buffer_type = Communicate::buffer_type<memory_space>;
 
         // constructor and destructor
-        FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B, size_t pcount, FDTDBoundaryCondition bcond = FDTDBoundaryCondition::PERIODIC,
+        FDTDSolver(Field_t& charge, VField_t& current, VField_t& E, VField_t& B, size_t pcount, LorentzFrame<Tfields> frameBoost_, undulator_parameters<Tfields> up, FDTDBoundaryCondition bcond = FDTDBoundaryCondition::PERIODIC,
                    FDTDParticleUpdateRule pur = FDTDParticleUpdateRule::LORENTZ, FDTDFieldUpdateRule fur = FDTDFieldUpdateRule::DO, double timestep = 0.05, bool seed_ = false,  VField_t* radiation = nullptr);
         ~FDTDSolver();
 
@@ -214,6 +482,8 @@ namespace ippl {
         double absorbed__energy;
         // buffer for communication
         detail::FieldBufferData<Tfields> fd_m;
+        LorentzFrame<Tfields> frameBoost;
+        undulator_parameters<Tfields> uparams;
         std::map<trackableOutput, std::ostream*> output_stream;
     };
 }  // namespace ippl

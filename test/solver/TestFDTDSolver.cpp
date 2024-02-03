@@ -292,16 +292,20 @@ Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_val
     return ret;
 
 }
+
+
+
 template <unsigned Dim, typename _scalar = double>
 struct fdtd_initer {
-    using s_t = ippl::FDTDSolver<_scalar, Dim>;
-    std::unique_ptr<s_t> m_solver;
-
+    using scalar = _scalar;
+    using s_t = ippl::FDTDSolver<scalar, Dim>;
     using Mesh_t      = ippl::UniformCartesian<_scalar, Dim>;
     using Centering_t = Mesh_t::DefaultCentering;
     typedef ippl::Field<_scalar, Dim, Mesh_t, Centering_t> Field_t;
     typedef ippl::Field<ippl::Vector<_scalar, Dim>, Dim, Mesh_t, Centering_t> VField_t;
-    using scalar = _scalar;
+    using Vector_t = typename s_t::Vector_t;
+
+    std::unique_ptr<s_t> m_solver;
     Field_t rho;
     VField_t current;
     VField_t fieldE, fieldB, radiation;
@@ -312,17 +316,24 @@ struct fdtd_initer {
     std::unique_ptr<Mesh_t> mesh;
     std::unique_ptr<ippl::FieldLayout<Dim>> layout;
     nlohmann::json custom_options;
+    ippl::undulator_parameters<scalar> undularor_params;
+    LorentzFrame<scalar> boost;
     typename s_t::Field_t::BConds_t m_ic_scalar_bcs;
-    using Vector_t = typename s_t::Vector_t;
     private:
     size_t required_steps;
     size_t particle_count;
     public:
-    fdtd_initer(ippl::Vector<int, Dim> _res, ippl::Vector<_scalar, Dim> _ext, size_t PC, scalar end_time, const nlohmann::json& _opt) : extents(_ext), custom_options(_opt) {
-        
+    fdtd_initer(scalar zgamma_of_bunch, const ippl::undulator_parameters<scalar>& u_params, ippl::Vector<int, Dim> _res, ippl::Vector<_scalar, Dim> _ext, size_t PC, scalar end_time, const nlohmann::json& _opt) :extents(_ext), custom_options(_opt), undularor_params(u_params),
+     boost(LorentzFrame<scalar>::template uniaxialGamma<'z'>(zgamma_of_bunch / Kokkos::sqrt(scalar(1) + undularor_params.K * undularor_params.K * 0.5))) {
+        using Kokkos::sqrt;
+        scalar zgamma_of_frame = zgamma_of_bunch / sqrt(scalar(1) + undularor_params.K * undularor_params.K * 0.5);
         particle_count = PC;
         // domain
         ippl::NDIndex<Dim> owned;
+
+
+        //TODO: BRUTALE HACK 
+        _ext[2] *= zgamma_of_frame;
         nr = _res;
         scalar dt = _ext[0] / _res[0];
         for (unsigned i = 0; i < Dim; i++) {
@@ -387,8 +398,7 @@ struct fdtd_initer {
                 assert(false);
                 fur = ippl::FDTDFieldUpdateRule::DO;
         }
-
-        m_solver = std::make_unique<s_t>(rho, current, fieldE, fieldB, PC,
+        m_solver = std::make_unique<s_t>(rho, current, fieldE, fieldB, PC,boost, u_params,
                                          ippl::FDTDBoundaryCondition::ABC_FALLAHI,
                                          pur,
                                          fur, dt, seed, &radiation);
@@ -416,6 +426,7 @@ struct fdtd_initer {
             am1v(i, j, k) =   ippl::Vector<scalar, 3>(0.0);
         });
     }
+    
     void setupBunch(size_t pc){
         (void)pc;
         m_solver->bunch.setParticleBC(ippl::BC::PERIODIC);
@@ -426,16 +437,19 @@ struct fdtd_initer {
         auto srn1view = m_solver->bunch.R_nm1.getView();
         auto gbrview  = m_solver->bunch.gamma_beta.getView();
 
-        Vector_t bunchpos     = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["position"]);// + extents * 0.5; //Mithra is centered
-        Vector_t direction    = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["direction"]);
-        Vector_t pos_var      = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["sigma-position"]);
-        Vector_t momentum_var = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["sigma-momentum"]);
-        Vector_t gamma_means  = getVector<scalar, Dim>(custom_options["bunch"]["bunch-initialization"]["particle-gammabetas"]);
+        Vector_t bunchpos     = getVector<scalar, Dim>(custom_options["bunch"]["position"]);// + extents * 0.5; //Mithra is centered
+        Vector_t direction    = getVector<scalar, Dim>(custom_options["bunch"]["direction"]);
+        Vector_t pos_var      = getVector<scalar, Dim>(custom_options["bunch"]["sigma-position"]);
+        Vector_t momentum_var = getVector<scalar, Dim>(custom_options["bunch"]["sigma-momentum"]);
+        Vector_t gamma_means  = getVector<scalar, Dim>(custom_options["bunch"]["particle-gammabetas"]);
 
         double externalStrength = custom_options["field"]["strength"];
         m_solver->externalMagneticScale = externalStrength;
         Kokkos::Random_XorShift64_Pool<> rand_pool(12345);
         scalar dt = m_solver->dt;
+        LorentzFrame<scalar> boost(this->boost);
+        auto boost_mat = boost.unprimedToPrimed();
+        LOG("Boost gamma:" << boost.gamma_m);
         Kokkos::parallel_for(
             Kokkos::RangePolicy<
                 typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(
@@ -452,8 +466,16 @@ struct fdtd_initer {
                         gbrview(idx)[i] = gammabeta_i;
                         gammabeta[i] = gammabeta_i;
                     }
-                    srn1view(idx) = srview(idx) - dt * gammabeta / (sqrt(1.0 + dot_prod(gammabeta, gammabeta)));
                     rand_pool.free_state(state);
+                    srn1view(idx) = srview(idx) - dt * gammabeta / (sqrt(1.0 + dot_prod(gammabeta, gammabeta)));
+                    LOG("Pos: " << srview(idx));
+                    srn1view(idx) = strip_t(boost_mat * prepend_t(srn1view(idx), scalar(0)));
+                    srview(idx)   = strip_t(boost_mat * prepend_t(srview(idx), scalar(0)));
+                    gbrview(idx) =  boost.transformGammabeta(gbrview(idx));
+                    LOG("BUNCH INIT:");
+                    LOG("Lorentz Matrix: " << boost_mat);
+                    LOG("Pos: " << srview(idx));
+                    LOG("Gammabeta: " << gbrview(idx));
                 }
                 // generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
                 //     solver.bunch.R.getView(),
@@ -654,8 +676,8 @@ auto jdefault(const nlohmann::json& v, const std::string& k, auto dv){
 int main(int argc, char* argv[]){
     ippl::initialize(argc, argv);
     {
-        //lorentz_frame<double>  frame(ippl::Vector<double, 3>{0.5,0.7,0.9});
-        //lorentz_frame<double> iframe(ippl::Vector<double, 3>{-0.5,-0.7,-0.9});
+        //LorentzFrame<double>  frame(ippl::Vector<double, 3>{0.5,0.7,0.9});
+        //LorentzFrame<double> iframe(ippl::Vector<double, 3>{-0.5,-0.7,-0.9});
         //matrix<double, 4, 4> lorenz  =  frame.unprimedToPrimed();
         //matrix<double, 4, 4> lorenz2 = iframe.primedToUnprimed();
         //std::cout << lorenz << "\n\n";
@@ -676,11 +698,12 @@ int main(int argc, char* argv[]){
         constexpr unsigned Dim = 3;
         ippl::Vector<int, Dim> res = getVector<int, Dim>(j["mesh"]["resolution"]);
         ippl::Vector<double, Dim> ext = ippl::Vector<double, 3>{j["mesh"]["extents"][0], j["mesh"]["extents"][1], j["mesh"]["extents"][2]};
-        size_t pc = j["bunch"]["bunch-initialization"]["number-of-particles"];
+        size_t pc = j["bunch"]["number-of-particles"];
         double time = j["mesh"]["total-time"];
+        double z_gamma = j["bunch"]["gamma"];
         std::cerr << "Res: " << res << "\n";
         std::cerr << "Ext: " << ext << "\n";
-        fdtd_initer<Dim> fdtd(res, ext, pc, time, j);
+        fdtd_initer<Dim> fdtd(z_gamma, ippl::undulator_parameters<double>(1.0, 1.0), res, ext, pc, time, j);
         fdtd.doRequiredSteps();
     }
     ippl::finalize();
