@@ -32,6 +32,18 @@ target_link_libraries (
     ${IPPL_LIBS}
     ${MPI_CXX_LIBRARIES}
 )
+add_executable (TestDiracSolver TestDiracSolver.cpp)
+target_link_libraries (
+    TestDiracSolver
+    ${IPPL_LIBS}
+    ${MPI_CXX_LIBRARIES}
+)
+add_executable (TestParticleBug TestParticleBug.cpp)
+target_link_libraries (
+    TestParticleBug
+    ${IPPL_LIBS}
+    ${MPI_CXX_LIBRARIES}
+)
 
 if (ENABLE_FFT)
     add_executable (TestGaussian_convergence TestGaussian_convergence.cpp)
