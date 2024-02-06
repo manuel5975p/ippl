@@ -441,26 +441,35 @@ struct fdtd_initer {
         Vector_t direction    = getVector<scalar, Dim>(custom_options["bunch"]["direction"]);
         Vector_t pos_var      = getVector<scalar, Dim>(custom_options["bunch"]["sigma-position"]);
         Vector_t momentum_var = getVector<scalar, Dim>(custom_options["bunch"]["sigma-momentum"]);
-        Vector_t gamma_means  = getVector<scalar, Dim>(custom_options["bunch"]["particle-gammabetas"]);
 
-        double externalStrength = custom_options["field"]["strength"];
-        m_solver->externalMagneticScale = externalStrength;
+
+        Vector_t truncations = getVector<scalar, Dim>(custom_options["bunch"]["distribution-truncations"]);
+
+        double bunch_gamma_mean  = (scalar)custom_options["bunch"]["gamma"];
+
+        scalar gammabeta_mean = bunch_gamma_mean * (Kokkos::sqrt(bunch_gamma_mean * bunch_gamma_mean - 1) / bunch_gamma_mean);
+        //m_solver->externalMagneticScale = externalStrength;
         Kokkos::Random_XorShift64_Pool<> rand_pool(12345);
         scalar dt = m_solver->dt;
         LorentzFrame<scalar> boost(this->boost);
         auto boost_mat = boost.unprimedToPrimed();
-        LOG("Boost gamma:" << boost.gamma_m);
+        //LOG("Boost gamma:" << boost.gamma_m);
         Kokkos::parallel_for(
             Kokkos::RangePolicy<
                 typename s_t::playout_type::RegionLayout_t::view_type::execution_space>(
                 0, m_solver->bunch.getLocalNum()),
                 KOKKOS_LAMBDA(size_t idx){
                     using Kokkos::sqrt;
+                    using Kokkos::abs;
+
                     auto state = rand_pool.get_state();
                     Vector_t gammabeta;
                     for(unsigned i = 0;i < Dim;i++){
                         srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
-                        const scalar gammabeta_i = state.normal(gamma_means[i], momentum_var[i]) * direction[i];
+                        while(abs(bunchpos[i] - srview(idx)[i]) >= truncations[i]){
+                            srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
+                        }
+                        const scalar gammabeta_i = state.normal(gammabeta_mean, momentum_var[i]) * direction[i];
                         //const scalar gammabeta_i = sqrt(gamma_i * gamma_i - 1.0);
                         //std::cout << gammabeta_i << " GAMA\n";
                         gbrview(idx)[i] = gammabeta_i;
@@ -468,14 +477,15 @@ struct fdtd_initer {
                     }
                     rand_pool.free_state(state);
                     srn1view(idx) = srview(idx) - dt * gammabeta / (sqrt(1.0 + dot_prod(gammabeta, gammabeta)));
-                    LOG("Pos: " << srview(idx));
+                    //LOG("Pos: " << srview(idx));
                     srn1view(idx) = strip_t(boost_mat * prepend_t(srn1view(idx), scalar(0)));
                     srview(idx)   = strip_t(boost_mat * prepend_t(srview(idx), scalar(0)));
+                    //LOG("Gammabeta: " << gbrview(idx));
                     gbrview(idx) =  boost.transformGammabeta(gbrview(idx));
-                    LOG("BUNCH INIT:");
-                    LOG("Lorentz Matrix: " << boost_mat);
-                    LOG("Pos: " << srview(idx));
-                    LOG("Gammabeta: " << gbrview(idx));
+                    //LOG("Gammabeta After Trf: " << gbrview(idx));
+                    //LOG("BUNCH INIT:");
+                    //LOG("Lorentz Matrix: " << boost_mat);
+                    //LOG("Pos: " << srview(idx));
                 }
                 // generate_random<ippl::Vector<scalar, Dim>, Kokkos::Random_XorShift64_Pool<>, Dim>(
                 //     solver.bunch.R.getView(),
@@ -542,6 +552,7 @@ struct fdtd_initer {
         if(ippl::Comm->rank() == 0 && custom_options["output"].contains("track")){
             //std::cerr << "contains track\n";
             if(custom_options["output"]["track"].contains("radiation")){
+                LOG("Traggin\n");
                 brad = std::make_unique<std::ofstream>((std::string)custom_options["output"]["track"]["radiation"]);
                 m_solver->output_stream[ippl::trackableOutput::boundaryRadiation] = brad.get();
             }
@@ -703,9 +714,20 @@ int main(int argc, char* argv[]){
         double z_gamma = j["bunch"]["gamma"];
         std::cerr << "Res: " << res << "\n";
         std::cerr << "Ext: " << ext << "\n";
-        fdtd_initer<Dim> fdtd(z_gamma, ippl::undulator_parameters<double>(1.0, 1.0), res, ext, pc, time, j);
+        if(!j.contains("undulator")){
+            std::cerr << "Undulator required\n";
+            goto end;
+        }
+        if(!j["undulator"].contains("static-undulator")){
+            std::cerr << "Only static undulator supported\n";
+            goto end;
+        }
+        
+        ippl::undulator_parameters<double> params((double)j["undulator"]["static-undulator"]["undulator-parameter"], (double)j["undulator"]["static-undulator"]["period"]);
+        fdtd_initer<Dim> fdtd(z_gamma, params, res, ext, pc, time, j);
         fdtd.doRequiredSteps();
     }
+    end:
     ippl::finalize();
 
     return 0;

@@ -142,10 +142,22 @@ namespace ippl {
         void scatterVolumetricallyCorrect(
             Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp1,
             const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp2, T dt_scale) const;
-
+        /**
+         * @brief Interpolate field f onto particles, resetting values
+         * 
+         * @tparam Field 
+         * @tparam P2 
+         * @param f 
+         * @param pp 
+         */
         template <typename Field, typename P2>
         void gather(Field& f, const ParticleAttrib<Vector<P2, Field::dim>, Properties...>& pp);
-
+        /**
+         * @brief ADDS TO VALUES!! Interpolate field f onto particles, adding values
+         * 
+         * @tparam Function 
+         * @tparam TParticleAttrib 
+         */
         template <typename Function, typename TParticleAttrib>
             requires(std::is_convertible_v<std::invoke_result_t<Function, typename TParticleAttrib::value_type>, T>)
         void gatherExternalField(Function f, const TParticleAttrib& pp);

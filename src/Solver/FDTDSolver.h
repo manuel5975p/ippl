@@ -276,6 +276,15 @@ struct LorentzFrame{
         ret.second = (unprimedEB.second - vscale(cross_prod(beta_m, unprimedEB.first ), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.second, vnorm))));
         return ret;
     }
+    KOKKOS_INLINE_FUNCTION Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> inverse_transform_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& unprimedEB)const noexcept{
+        using Kokkos::sqrt;
+        ippl::Vector<T, 3> mgb(gammaBeta_m * -1.0);
+        Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> ret;
+        Vector3 vnorm = vscale(beta_m, (1.0 / sqrt(dot_prod(beta_m, beta_m))));
+        ret.first  = (unprimedEB.first  + vscale(cross_prod(beta_m, unprimedEB.second), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.first,  vnorm))));
+        ret.second = (unprimedEB.second - vscale(cross_prod(beta_m, unprimedEB.first ), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.second, vnorm))));
+        return ret;
+    }
     //Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> transform_inverse_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& primedEB)const noexcept{
     //    using Kokkos::sqrt;
     //    Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> ret;

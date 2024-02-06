@@ -326,20 +326,20 @@ namespace ippl {
 
                     // x -> nghost + x
                     coords[d] += nghost;
-                    auto&& left = apply(view, coords);
+                    auto&& left = ::ippl::apply(view, coords);
 
                     // nghost + x -> N - (nghost + x) = N - nghost - x
                     coords[d]    = N - coords[d];
-                    auto&& right = apply(view, coords);
+                    auto&& right = ::ippl::apply(view, coords);
 
                     // N - nghost - x -> nghost - 1 - x
                     coords[d] += 2 * nghost - 1 - N;
-                    apply(view, coords) = right;
+                    ::ippl::apply(view, coords) = right;
 
                     // nghost - 1 - x -> N - (nghost - 1 - x)
                     //     = N - (nghost - 1) + x
                     coords[d]           = N - coords[d];
-                    apply(view, coords) = left;
+                    ::ippl::apply(view, coords) = left;
                 });
         }
     }
