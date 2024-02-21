@@ -42,6 +42,10 @@ inline const char* from_last_slash(const char* x) {
         --end;
     return end;
 }
+template<size_t N, typename... Ts>
+void primpf(const char (&str)[N], Ts&&... args){
+    std::cout << std::format(str, args...);
+}
 
 enum axis_aligned_occlusion : unsigned int {
     NONE   = 0u,
@@ -585,11 +589,11 @@ namespace ippl {
         }
 
         Kokkos::fence();
-        int fieldToBunchTimestepRatio = 16;
+        int fieldToBunchTimestepRatio = 64;
         Kokkos::View<Vector_t*> particleR_backup  ("particleR_backup"  , bunch.getLocalNum());
         Kokkos::View<Vector_t*> particleRm1_backup("particleRm1_backup", bunch.getLocalNum());
         {
-            auto rview          = bunch.R.getView();
+            auto rview            = bunch.R.getView();
             auto rm1view          = bunch.R_nm1.getView();
             Kokkos::parallel_for(ippl::getRangePolicy(particleR_backup), KOKKOS_LAMBDA(size_t idx){
                 particleR_backup  (idx) = rview(idx);
@@ -599,18 +603,82 @@ namespace ippl {
         for(int bunch_timestep_index = 0; bunch_timestep_index < fieldToBunchTimestepRatio; bunch_timestep_index++){
             bunch.E_gather.gather(*(this->En_mp), bunch.R);
             bunch.B_gather.gather(*(this->Bn_mp), bunch.R);
+            //bunch.B_gather = 0.0;
+            //bunch.E_gather = 0.0;
             Kokkos::fence();
 
             auto local_up = this->uparams;     // Avoid [this] capture :vomit:
             auto local_lb = this->frameBoost;  // Avoid [this] capture :vomit:
-            auto local_bunchtolab =
-                this->frameBoost.primedToUnprimed();  // Avoid [this] capture :vomit:
+            auto local_bunchtolab = this->frameBoost.primedToUnprimed();  // Avoid [this] capture :vomit:
             Tfields k_u                 = Tfields(2) * M_PI / local_up.lambda;
             const scalar bunch_dt = this->dt / fieldToBunchTimestepRatio;
-            const scalar time    = this->dt * iteration + bunch_timestep_index * bunch_dt;
+            //LOG("Time subtracted: " << 80.0 / k_u / this->frameBoost.gamma_m);
+            const scalar time    = this->dt * iteration + bunch_timestep_index * bunch_dt - 40.0 / k_u / this->frameBoost.gamma_m;
+            
+            //LOG("Time: " << time);
+            const Tfields yextent = hr_m[1] * nr_m[1];
+            //LOG("Yextent: " << yextent);
+            auto undulator_field = KOKKOS_LAMBDA(const ippl::Vector<Tfields, 4>& labTimeandPos) -> Kokkos::pair<Vector_t, Vector_t>{
+                //LOG("Undulator evaluated at " << labTimeandPos);
+                using Kokkos::cosh;
+                using Kokkos::sinh;
+                using Kokkos::tanh;
+                using Kokkos::cos;
+                using Kokkos::sin;
+                using Kokkos::exp;
 
-            bunch.B_gather.gatherExternalField(
+                Kokkos::pair<Vector_t, Vector_t> ret;
+
+                ret.first = ippl::Vector<Tfields, 3>(0.0);
+
+                //LOG("Eval Z: " << (funits::length<Tfields, funits::planck_base>(labTimeandPos[3]).template convert_to<funits::SI_base>()));
+                if(labTimeandPos[3] < 0.0){
+                    Tfields scal = exp(-(k_u * labTimeandPos[3] * k_u * labTimeandPos[3] * 0.5));
+                    ret.second = ippl::Vector<Tfields, 3>{Tfields(0),
+                                                 scal * k_u * labTimeandPos[3] * local_up.B_magnitude * cosh(k_u * (labTimeandPos[2])),
+                                                 scal * local_up.B_magnitude * sinh(k_u * (labTimeandPos[2]))};
+
+                }
+                else if(labTimeandPos[3] >= local_up.length){
+                    scalar distance_to_entry = labTimeandPos[3] - local_up.length;
+                    Tfields scal = exp(-(k_u * distance_to_entry * k_u * distance_to_entry * 0.5));
+                    ret.second = ippl::Vector<Tfields, 3>{Tfields(0),
+                                                 scal * k_u * distance_to_entry * local_up.B_magnitude * cosh(k_u * (labTimeandPos[2])),
+                                                 scal * local_up.B_magnitude * sinh(k_u * (labTimeandPos[2]))};
+                }
+                else{
+                    //LOG("We're inside: " << strip_t(labTimeandPos));
+                    Tfields trigoArg = k_u * labTimeandPos[3];
+                    Tfields scal = 1.0;//tanh((trigoArg - 100.0) / 50.0) * 0.5 + 0.5;
+                    //labframe_EB.second = ippl::Vector<Tfields, 3>{0.0, cosh(k_u * (labTimeandPos[2] - yextent * 0.5)) * local_up.B_magnitude * sin(k_u * labTimeandPos[3]), 0.0};
+                    ret.second = ippl::Vector<Tfields, 3>{Tfields(0),
+                                                     scal * local_up.B_magnitude * cosh(k_u * (labTimeandPos[2]))
+                                                         * sin(k_u * labTimeandPos[3]),
+                                                     scal * local_up.B_magnitude * sinh(k_u * (labTimeandPos[2]))
+                                                         * cos(k_u * labTimeandPos[3])};
+                }
+                return ret;
+            };
+            if(false && iteration == 0){
+                std::cout << frameBoost.primedToUnprimed() << "\n\n";
+                std::cout << "Time0 = " << time << "\n";
+                ippl::Vector<scalar, 3> hr2 = hr_m * nr_m;
+                hr2 *= 0.5;
+                hr2 += Bn_mp->get_mesh().getOrigin();
+                std::cout << "Undulator B0 " << local_up.B_magnitude << "\n";
+                std::cout << "Undulator K " << local_up.K << "\n";
+                std::cout << "Undulator lambda " << local_up.lambda << "\n";
+                std::cout << "Primed Pos " << prepend_t(hr2, time) << "\n";
+                std::cout << "Pos " << frameBoost.primedToUnprimed() * prepend_t(hr2, time) << "\n";
+                std::cout << "UF " << undulator_field(frameBoost.primedToUnprimed() * prepend_t(hr2, time)).second << "\n";
+                std::cout.flush();
+                //std::terminate();
+            }
+
+            //TODO: Undulator abstraction
+            bunch.E_gather.gatherExternalField(
                 KOKKOS_LAMBDA(Vector_t x)->Vector_t {
+                    //return Vector_t{0, 0.0, 0};
                     using Kokkos::cosh;
                     using Kokkos::sinh;
                     using Kokkos::cos;
@@ -620,30 +688,54 @@ namespace ippl {
                     ippl::Vector<Tfields, 4> bunchTimeandPos = prepend_t(x, time);
                     ippl::Vector<Tfields, 4> labTimeandPos   = local_bunchtolab * bunchTimeandPos;
 
+                    //LOG("Lab eval pos: " << labTimeandPos);
                     // Actual undulator evaluation =====
-                    Kokkos::pair<ippl::Vector<Tfields, 3>, ippl::Vector<Tfields, 3>> labframe_EB;
-                    labframe_EB.first = ippl::Vector<Tfields, 3>(0.0);
-                    labframe_EB.second =
-                        ippl::Vector<Tfields, 3>{
-                                                 local_up.B_magnitude * cosh(k_u * labTimeandPos[1])
-                                                     * sin(k_u * labTimeandPos[2]),
-                                                 local_up.B_magnitude * sinh(k_u * labTimeandPos[1])
-                                                     * cos(k_u * labTimeandPos[2]), 0};
+                    Kokkos::pair<ippl::Vector<Tfields, 3>, ippl::Vector<Tfields, 3>> labframe_EB = undulator_field(labTimeandPos);
+                    //LOG("Lab Y: " << labTimeandPos[2]);
+                    //labframe_EB.second = ippl::Vector<Tfields, 3>{0.0, cosh(k_u * (labTimeandPos[2] - yextent * 0.5)) * local_up.B_magnitude * sin(k_u * labTimeandPos[3]), 0.0};
 
                     // Transform back ==================
 
-                    Kokkos::pair<ippl::Vector<Tfields, 3>, ippl::Vector<Tfields, 3>> bunchframe_EB =
-                        local_lb.transform_EB(labframe_EB);
-                    LOG("Undulator bunch E" << bunchframe_EB.first << "\n");
-                    LOG("Undulator bunch B" << bunchframe_EB.second << "\n\n");
+                    Kokkos::pair<ippl::Vector<Tfields, 3>, ippl::Vector<Tfields, 3>> bunchframe_EB = local_lb.transform_EB(labframe_EB);
+                    //LOG("Undulator bunch E" << bunchframe_EB.first);
+                    //LOG("Undulator bunch B" << bunchframe_EB.second);
+                    //LOG("Undulator lab   E" << labframe_EB.first);
+                    //LOG("Undulator lab   B" << labframe_EB.second << "\n");
+                    return bunchframe_EB.first;
+                },
+                bunch.R);
+            
+            bunch.B_gather.gatherExternalField(
+                KOKKOS_LAMBDA(Vector_t x)->Vector_t {
+
+                    //LOG("GAMMA: " << local_lb.gamma_m);
+                    // Transform to lab frame ===========
+                    ippl::Vector<Tfields, 4> bunchTimeandPos = prepend_t(x, time);
+                    ippl::Vector<Tfields, 4> labTimeandPos   = local_bunchtolab * bunchTimeandPos;
+
+                    // Actual undulator evaluation =====
+                    Kokkos::pair<ippl::Vector<Tfields, 3>, ippl::Vector<Tfields, 3>> labframe_EB = undulator_field(labTimeandPos);
+                    
+                    
+
+                    // Transform back ==================
+
+                    Kokkos::pair<ippl::Vector<Tfields, 3>, ippl::Vector<Tfields, 3>> bunchframe_EB = local_lb.transform_EB(labframe_EB);
+                    if(bunch_timestep_index == 0){
+                    //    LOG("Undulator bunch E" << bunchframe_EB.first);
+                    //    LOG("Undulator bunch B" << bunchframe_EB.second);
+                    //    LOG("Undulator lab   E" << labframe_EB.first);
+                    //    LOG("Undulator lab   B" << labframe_EB.second << "\n");
+                    }
                     return bunchframe_EB.second;
                 },
                 bunch.R);
             Kokkos::fence();
 
             // TODO: HACK!!!!!!!!!!!!!!!!!!!!!!!!
-            const scalar e_mass = electron_mass / bunch.getTotalNum();
+            //const scalar e_mass = electron_mass / bunch.getTotalNum();
             auto Qview          = bunch.Q.getView();
+            auto mass_view      = bunch.mass.getView();
             auto rview          = bunch.R.getView();
             auto rnp1view       = bunch.R_np1.getView();
             auto rnm1view       = bunch.R_nm1.getView();
@@ -667,25 +759,33 @@ namespace ippl {
                     KOKKOS_LAMBDA(const size_t i) {
                         using Kokkos::sqrt;
                         //LOG("Pos: " << rview(i));
-                        //if(i % 2048 == 0)
-                        //LOG("Egather: " << E_gatherview(i));
-                        //LOG("Bgather: " << B_gatherview(i));
+                        if(i == 0){
+                            //LOG("Egather: " << E_gatherview(i));
+                            //LOG("Bgather: " << B_gatherview(i));
+                            //LOG("bdt: " << bunch_dt);
+                        }
+                        const scalar charge                      = Qview(i);
+                        const scalar e_mass                      = mass_view(i);
+                        //LOG("mass: " << e_mass);
+                        //LOG("charge: " << charge);
                         
-                        const scalar charge                      = -Qview(i);
                         const ippl::Vector<scalar, 3> pgammabeta = gammabeta_view(i);
-                        const ippl::Vector<scalar, 3> t1 =
-                            pgammabeta - charge * bunch_dt * E_gatherview(i) / (2.0 * e_mass);
-                        const scalar alpha =
-                            -charge * bunch_dt / (scalar(2) * e_mass * sqrt(1 + dot_prod(t1, t1)));
-                        ippl::Vector<scalar, 3> crossprod =
-                            alpha * ippl::cross(t1, B_gatherview(i));
-                        const ippl::Vector<scalar, 3> t2 =
-                            t1 + alpha * ippl::cross(t1, B_gatherview(i));
+                        //LOG("pgammabeta: " << pgammabeta);
+                        const ippl::Vector<scalar, 3> t1 = pgammabeta - charge * bunch_dt * E_gatherview(i) / (2.0 * e_mass);
+                        const scalar alpha = -charge * bunch_dt / (scalar(2) * e_mass * sqrt(1 + dot_prod(t1, t1)));
+
+                        const ippl::Vector<scalar, 3> t2 = t1 + alpha * ippl::cross(t1, B_gatherview(i));
                         const ippl::Vector<scalar, 3> t3 = t1 + ippl::cross(t2, 2.0 * alpha * (B_gatherview(i) / (1.0  + alpha * alpha * dot_prod(B_gatherview(i), B_gatherview(i)))));
                         const ippl::Vector<scalar, 3> ngammabeta = t3 - charge * bunch_dt * E_gatherview(i) / (2.0 * e_mass);
                         rnp1view(i) = rview(i) + bunch_dt * ngammabeta / (sqrt(1.0 + dot_prod(ngammabeta, ngammabeta)));
-                        //LOG("Npos: " << ngammabeta);
+                        //Vector_t dd = ngammabeta - pgammabeta;
+                        //LOG("New Pos: " << rnp1view(i));
+                        //LOG("Force exerted: " << dd);
+                        //if(bunch_timestep_index == 0)
+                            //LOG("New GB " << ngammabeta);
+                        
                         gammabeta_view(i) = ngammabeta;
+                        //LOG("V = " << gammabeta_view(i));
                     });
             } break;
             case FDTDParticleUpdateRule::DIPOLE_ORBIT: {
@@ -761,7 +861,7 @@ namespace ippl {
                     Kokkos::deep_copy(rnp1view, rview);
                 } break;
             }
-            this->JN_mp->operator=(0.0);
+            
             
 
             Kokkos::deep_copy(bunch.R_nm1.getView(), bunch.R.getView());
@@ -787,7 +887,7 @@ namespace ippl {
 
             bunch.R_np12 = (bunch.R + bunch.R_np1) * 0.5;
             bunch.R_nm12 = (bunch.R + bunch.R_nm1) * 0.5;
-
+            this->JN_mp->operator=(0.0);
             bunch.Q.scatterVolumetricallyCorrect(*this->JN_mp, bunch.R_nm12, bunch.R_np12,
                                                  scalar(1.0) / dt);
 
@@ -963,10 +1063,14 @@ namespace ippl {
         
         En_mp->getLayout().comm.allreduce(frame_rad_local, frame_rad_global, 1, std::plus<Vector_t>());
         frame_rad_global *= hr_m[0] * double(nr_m[0]) * hr_m[1] * double(nr_m[1]);
-
+        //LOG("Cross Section: " << hr_m[0] * double(nr_m[0]) * hr_m[1] * double(nr_m[1]));
         if (ippl::Comm->rank() == 0 && output_stream.contains(trackableOutput::boundaryRadiation)) {
+            using namespace funits;
+            ippl::Vector<Tfields, 4> measurement_position_bunchframe = ippl::Vector<Tfields, 4>{this->dt * iteration, 0.0, 0.0, hr_m[2] * nr_m[2] * 0.5};
+            ippl::Vector<Tfields, 4> measurement_position_labframe   = frameBoost.primedToUnprimed() * measurement_position_bunchframe;
+            
             *(output_stream.at(trackableOutput::boundaryRadiation))
-                << this->dt * iteration << " " << frame_rad_global[2] << std::endl;  // Flush
+                << (length<double, planck_base>(measurement_position_labframe[3]).template convert_to<SI_base>().count()) << " " << frame_rad_global[2] << std::endl;  // Flush
         }
         if (ippl::Comm->rank() == 0
             && output_stream.contains(trackableOutput::cumulativeRadiation)) {
@@ -998,7 +1102,7 @@ namespace ippl {
             !!bunch.getLocalNum(), KOKKOS_LAMBDA(size_t i, Vector_t & ref) { ref += brview(i); },
             p0pos);
         if (output_stream.contains(trackableOutput::p0pos)) {
-            *(output_stream.at(trackableOutput::p0pos)) << p0pos[1] << " " << p0pos[2] << "\n";
+            *(output_stream.at(trackableOutput::p0pos)) << p0pos[0] << " " << p0pos[1] << " " << p0pos[2] << "\n";
         }
         // std::cerr << "Particle pos: " << p0pos[0] << " " << p0pos[1] << " " << p0pos[2] <<
         // "\n";
@@ -1050,9 +1154,11 @@ namespace ippl {
         aN_m   = 0.0;
         aNp1_m = 0.0;
 
+        LOG("::create called with " << pcount_m);
         bunch.create(pcount_m);
-        bunch.Q             = electron_charge / (pcount_m * ippl::Comm->size());
-        size_t tracer_count = 1000 * 1000;
+        //This has been moved to fdtd_initer
+        //bunch.Q             = electron_charge / (pcount_m * ippl::Comm->size());
+        size_t tracer_count = 0 * 1234;
         {
             size_t tcisqrt = (size_t)(std::sqrt((double)tracer_count));
             if (tcisqrt * tcisqrt != tracer_count) {

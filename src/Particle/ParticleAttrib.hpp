@@ -140,7 +140,15 @@ namespace ippl {
             KOKKOS_CLASS_LAMBDA(const size_t idx) {
                 // find nearest grid point
                 vector_type l                        = (pp(idx) - origin) * invdx + 0.5;
+                
                 Vector<int, Field::dim> index        = l;
+                if(index[0] < view.extent(0) - nghost &&
+                   index[1] < view.extent(1) - nghost &&
+                   index[2] < view.extent(2) - nghost &&
+                   index[0] >= nghost &&
+                   index[1] >= nghost &&
+                   index[2] >= nghost
+                    ){
                 Vector<PositionType, Field::dim> whi = l - index;
                 Vector<PositionType, Field::dim> wlo = 1.0 - whi;
 
@@ -150,6 +158,7 @@ namespace ippl {
                 const value_type& val = dview_m(idx);
                 detail::scatterToField(std::make_index_sequence<1 << Field::dim>{}, view, wlo, whi,
                                        args, val * spatial_scale);
+                }
             });
         IpplTimings::stopTimer(scatterTimer);
 
@@ -236,26 +245,37 @@ namespace ippl {
         const vector_type& dx     = mesh.getMeshSpacing();
         const vector_type& origin = mesh.getOrigin();
         const vector_type invdx   = 1.0 / dx;
+        //std::cout << "INVDX" << invdx << "\n";
 
         const FieldLayout<Dim>& layout = f.getLayout();
         const NDIndex<Dim>& lDom       = layout.getLocalNDIndex();
         const int nghost               = f.getNghost();
-
+        //std::cout << "Particle count " << *(this->localNum_mp) << "\n";
+        //assert(*(this->localNum_mp) == 1);
+        auto this_view = dview_m;
         using policy_type = Kokkos::RangePolicy<execution_space>;
         Kokkos::parallel_for(
             "ParticleAttrib::gather", policy_type(0, *(this->localNum_mp)),
-            KOKKOS_CLASS_LAMBDA(const size_t idx) {
+            KOKKOS_LAMBDA(const size_t idx) {
                 // find nearest grid point
+                //std::cout << idx << "\n";
+                //std::cout << "Particle pos: " << pp(idx) << std::endl;
                 vector_type l                        = (pp(idx) - origin) * invdx + 0.5;
                 Vector<int, Field::dim> index        = l;
-                Vector<PositionType, Field::dim> whi = l - index;
-                Vector<PositionType, Field::dim> wlo = 1.0 - whi;
+                //std::cout << "Access pos: " << l << "\n";
+                //std::cout << "Access index: " << index << "\n";
+                if(index[0] >= 0 && (size_t)index[0] < view.extent(0) &&
+                   index[1] >= 0 && (size_t)index[1] < view.extent(1) &&
+                   index[2] >= 0 && (size_t)index[2] < view.extent(2)){
+                    Vector<PositionType, Field::dim> whi = l - index;
+                    Vector<PositionType, Field::dim> wlo = 1.0 - whi;
 
-                Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
+                    Vector<size_t, Field::dim> args = index - lDom.first() + nghost;
 
-                // gather
-                dview_m(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},
+                    // gather
+                    this_view(idx) = detail::gatherFromField(std::make_index_sequence<1 << Field::dim>{},
                                                        view, wlo, whi, args);
+                }
             });
         IpplTimings::stopTimer(gatherTimer);
     }

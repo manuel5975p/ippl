@@ -27,7 +27,7 @@
 // You should have received a copy of the GNU General Public License
 // along with IPPL. If not, see <https://www.gnu.org/licenses/>.
 //
-
+#undef NDEBUG
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Core_fwd.hpp>
 #include "Ippl.h"
@@ -96,7 +96,7 @@ struct generate_random {
 };
 void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<double, 3>,
                          ippl::UniformCartesian<double, 3>::DefaultCentering>& E,
-             int nx, int ny, int nz, int iteration, double dx, double dy, double dz) {
+             int nx, int ny, int nz, int iteration, double dx, double dy, double dz, double factor = 1.0) {
     using Mesh_t      = ippl::UniformCartesian<double, 3>;
     using Centering_t = Mesh_t::DefaultCentering;
     typedef ippl::Field<ippl::Vector<double, 3>, 3, Mesh_t, Centering_t> VField_t;
@@ -127,8 +127,8 @@ void dumpVTK(ippl::Field<ippl::Vector<double, 3>, 3, ippl::UniformCartesian<doub
     for (int x = 0; x < nx + 2; x++) {
         for (int y = 0; y < ny + 2; y++) {
             for (int z = 0; z < nz + 2; z++) {
-                vtkout << host_view(x, y, z)[0] << "\t" << host_view(x, y, z)[1] << "\t"
-                       << host_view(x, y, z)[2] << endl;
+                vtkout << host_view(x, y, z)[0] * factor << "\t" << host_view(x, y, z)[1] * factor << "\t"
+                       << host_view(x, y, z)[2] * factor << endl;
             }
         }
     }
@@ -295,6 +295,48 @@ Kokkos::View<view_value_type*> collect_linear_view_on_zero(Kokkos::View<view_val
 
 
 
+std::string lowercase_singular(std::string str) {
+    // Convert string to lowercase
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+
+    // Check if the string ends with "s" and remove it if it does
+    if (!str.empty() && str.back() == 's') {
+        str.pop_back();
+    }
+
+    return str;
+}
+double get_length_multiplier(const nlohmann::json& options){
+    std::string length_scale_string = lowercase_singular((std::string)options["mesh"]["length-scale"]);
+    double length_factor = 1.0;
+    switch (chash(length_scale_string)) {
+        case chash<"planck-length">():
+        case chash<"plancklength">():
+        case chash<"pl">():
+        case chash<"natural">():
+            length_factor = 1.0;
+        break;
+        case chash<"picometer">():
+            length_factor = 1e-12 * meter_in_unit_lengths;
+        break;
+        case chash<"nanometer">():
+            length_factor = 1e-9 * meter_in_unit_lengths;
+        break;
+        case chash<"micrometer">():
+            length_factor = 1e-6 * meter_in_unit_lengths;
+        break;
+        case chash<"millimeter">():
+            length_factor = 1e-3 * meter_in_unit_lengths;
+        break;
+        case chash<"meter">():
+            length_factor = meter_in_unit_lengths;
+        break;
+        default:
+            std::cerr << "Unrecognized length scale: " << (std::string)options["mesh"]["length-scale"] << "\n";
+        break;
+    }
+    return length_factor;
+}
 template <unsigned Dim, typename _scalar = double>
 struct fdtd_initer {
     using scalar = _scalar;
@@ -324,9 +366,9 @@ struct fdtd_initer {
     size_t particle_count;
     public:
     fdtd_initer(scalar zgamma_of_bunch, const ippl::undulator_parameters<scalar>& u_params, ippl::Vector<int, Dim> _res, ippl::Vector<_scalar, Dim> _ext, size_t PC, scalar end_time, const nlohmann::json& _opt) :extents(_ext), custom_options(_opt), undularor_params(u_params),
-     boost(LorentzFrame<scalar>::template uniaxialGamma<'z'>(zgamma_of_bunch / Kokkos::sqrt(scalar(1) + undularor_params.K * undularor_params.K * 0.5))) {
+     boost(LorentzFrame<scalar>::template uniaxialGamma<'z'>(zgamma_of_bunch / Kokkos::sqrt(scalar(1) + u_params.K * u_params.K * 0.5))) {
         using Kokkos::sqrt;
-        scalar zgamma_of_frame = zgamma_of_bunch / sqrt(scalar(1) + undularor_params.K * undularor_params.K * 0.5);
+        scalar zgamma_of_frame = zgamma_of_bunch / Kokkos::sqrt(scalar(1) + undularor_params.K * undularor_params.K * 0.5);
         particle_count = PC;
         // domain
         ippl::NDIndex<Dim> owned;
@@ -341,9 +383,10 @@ struct fdtd_initer {
             hr[i]    = _ext[i] / _res[i];
             dt = std::min(dt, hr[i]);
         }
+        std::cout << "Unrounded dt = " << dt << "\n";
 
         bool seed                        = false;
-        ippl::Vector<scalar, Dim> origin = {0.0, 0.0, 0.0};
+        ippl::Vector<scalar, Dim> origin = {-_ext[0] * 0.5, -_ext[1] * 0.5, -_ext[2] * 0.5};
         mesh = std::make_unique<Mesh_t>(owned, hr, origin);
         const scalar c = 1.0;  // 299792458.0;
         dt *= 0.5 / c;
@@ -353,6 +396,7 @@ struct fdtd_initer {
         required_steps = std::ceil(end_time / dt);
         
         dt = end_time / required_steps;
+        std::cout << "zuero = " << end_time / dt << "\n";
         std::cout << "picking dt = " << dt << "\n";
         std::array<bool, Dim> isParallel;
         isParallel.fill(true);
@@ -381,6 +425,7 @@ struct fdtd_initer {
             break;
             case chash<"stationary">():
                 pur = ippl::FDTDParticleUpdateRule::STATIONARY;
+                pur = ippl::FDTDParticleUpdateRule::STATIONARY;
             break;
             default:
                 assert(false);
@@ -398,15 +443,15 @@ struct fdtd_initer {
                 assert(false);
                 fur = ippl::FDTDFieldUpdateRule::DO;
         }
-        m_solver = std::make_unique<s_t>(rho, current, fieldE, fieldB, PC,boost, u_params,
-                                         ippl::FDTDBoundaryCondition::ABC_FALLAHI,
+        m_solver = std::make_unique<s_t>(rho, current, fieldE, fieldB, PC, boost, u_params,
+                                         ippl::FDTDBoundaryCondition::ABC_MUR,
                                          pur,
                                          fur, dt, seed, &radiation);
         setupBunch(PC);
         initialConditionPhi();
 
         //initialConditionA();
-        m_solver->setBoundaryConditions(ippl::Vector<ippl::FDTDBoundaryCondition, 3>(ippl::FDTDBoundaryCondition::ABC_FALLAHI));
+        m_solver->setBoundaryConditions(ippl::Vector<ippl::FDTDBoundaryCondition, 3>(ippl::FDTDBoundaryCondition::ABC_MUR));
     }
     void initialConditionA(){
         auto av = m_solver->aN_m.getView();
@@ -428,30 +473,44 @@ struct fdtd_initer {
     }
     
     void setupBunch(size_t pc){
+        LOG("Setting up bunch: " << pc << " Particles");
         (void)pc;
-        m_solver->bunch.setParticleBC(ippl::BC::PERIODIC);
+        m_solver->bunch.setParticleBC(ippl::BC::NO);
 
         //Not required, since done by m_solver constructor
         //m_solver->bunch.create(pc);
         auto srview   = m_solver->bunch.R.getView();
         auto srn1view = m_solver->bunch.R_nm1.getView();
         auto gbrview  = m_solver->bunch.gamma_beta.getView();
-
+        const double length_factor = get_length_multiplier(custom_options);
         Vector_t bunchpos     = getVector<scalar, Dim>(custom_options["bunch"]["position"]);// + extents * 0.5; //Mithra is centered
+        bunchpos *= length_factor;
+
         Vector_t direction    = getVector<scalar, Dim>(custom_options["bunch"]["direction"]);
         Vector_t pos_var      = getVector<scalar, Dim>(custom_options["bunch"]["sigma-position"]);
+        pos_var *= length_factor;
         Vector_t momentum_var = getVector<scalar, Dim>(custom_options["bunch"]["sigma-momentum"]);
-
+        scalar bunching_factor = scalar(custom_options["bunch"]["bunching-factor"]);
 
         Vector_t truncations = getVector<scalar, Dim>(custom_options["bunch"]["distribution-truncations"]);
+        truncations *= length_factor;
 
         double bunch_gamma_mean  = (scalar)custom_options["bunch"]["gamma"];
 
         scalar gammabeta_mean = bunch_gamma_mean * (Kokkos::sqrt(bunch_gamma_mean * bunch_gamma_mean - 1) / bunch_gamma_mean);
+        //beta_0
+        const scalar frame_beta = this->boost.beta_m[2];
+        
+        //beta_bar
+        const scalar bunch_average_beta = (Kokkos::sqrt(bunch_gamma_mean * bunch_gamma_mean - 1) / bunch_gamma_mean);
+        
+        const scalar chi = 1.0 + bunch_average_beta / frame_beta;
+        const scalar k_u = (2.0 * M_PI) / undularor_params.lambda;
         //m_solver->externalMagneticScale = externalStrength;
         Kokkos::Random_XorShift64_Pool<> rand_pool(12345);
         scalar dt = m_solver->dt;
         LorentzFrame<scalar> boost(this->boost);
+        ippl::undulator_parameters<scalar> uparams = this->undularor_params;
         auto boost_mat = boost.unprimedToPrimed();
         //LOG("Boost gamma:" << boost.gamma_m);
         Kokkos::parallel_for(
@@ -461,15 +520,24 @@ struct fdtd_initer {
                 KOKKOS_LAMBDA(size_t idx){
                     using Kokkos::sqrt;
                     using Kokkos::abs;
+                    using Kokkos::sin;
 
                     auto state = rand_pool.get_state();
                     Vector_t gammabeta;
                     for(unsigned i = 0;i < Dim;i++){
-                        srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
-                        while(abs(bunchpos[i] - srview(idx)[i]) >= truncations[i]){
+                        if(i < Dim - 1){
                             srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
+                            while(abs(bunchpos[i] - srview(idx)[i]) >= truncations[i]){
+                                srview(idx)[i] = state.normal(bunchpos[i], pos_var[i]);
+                            }
                         }
+                        else{
+                            srview(idx)[i] = pos_var[i] * (state.drand() - 0.5) + bunchpos[i];
+                            srview(idx)[i] += chi * boost.gamma_m * bunching_factor / (uparams.lambda) * sin(2.0 * chi * boost.gamma_m * k_u * srview(idx)[i]);
+                        }
+                        //LOG("gammabeta_mean: " << gammabeta_mean);
                         const scalar gammabeta_i = state.normal(gammabeta_mean, momentum_var[i]) * direction[i];
+                        //LOG("gammabeta_mean_i: " << gammabeta_i);
                         //const scalar gammabeta_i = sqrt(gamma_i * gamma_i - 1.0);
                         //std::cout << gammabeta_i << " GAMA\n";
                         gbrview(idx)[i] = gammabeta_i;
@@ -480,9 +548,12 @@ struct fdtd_initer {
                     //LOG("Pos: " << srview(idx));
                     srn1view(idx) = strip_t(boost_mat * prepend_t(srn1view(idx), scalar(0)));
                     srview(idx)   = strip_t(boost_mat * prepend_t(srview(idx), scalar(0)));
-                    //LOG("Gammabeta: " << gbrview(idx));
+                    //LOG("Particle inited to " << srview(idx));
+                    
+                    LOG("Gammabeta: " << gbrview(idx));
                     gbrview(idx) =  boost.transformGammabeta(gbrview(idx));
-                    //LOG("Gammabeta After Trf: " << gbrview(idx));
+                    //gbrview(idx)[0] = 1;
+                    LOG("Gammabeta After Trf: " << gbrview(idx));
                     //LOG("BUNCH INIT:");
                     //LOG("Lorentz Matrix: " << boost_mat);
                     //LOG("Pos: " << srview(idx));
@@ -502,6 +573,8 @@ struct fdtd_initer {
                 //    gbrview(idx) = ippl::Vector<scalar, Dim>{0.0, 0.0, 0.0};
                 //}
             );
+        m_solver->bunch.Q             = ((scalar)custom_options["bunch"]["charge"]) * electron_charge_in_unit_charges / (m_solver->pcount_m * ippl::Comm->size());
+        m_solver->bunch.mass          = ((scalar)custom_options["bunch"]["mass"]) * electron_mass_in_unit_masses / (m_solver->pcount_m * ippl::Comm->size());
         Kokkos::fence();
     }
     void initialConditionPhi() {
@@ -511,6 +584,7 @@ struct fdtd_initer {
 
         m_solver->pl.update(m_solver->bunch);
         m_solver->bunch.Q.scatterVolumetricallyCorrect(rho, m_solver->bunch.R);
+        //LOG("IC Schatter: " << m_solver->bunch.R.getView()(0));
         auto bcsetter_single = [&ic_scalar_bcs, hr]<size_t Idx>(const std::index_sequence<Idx>&) {
             ic_scalar_bcs[Idx] = std::make_shared<ippl::ZeroFace<Field_t>>(Idx);
             return 0;
@@ -569,6 +643,14 @@ struct fdtd_initer {
         }
         for (unsigned int it = 0; it < required_steps; ++it){
             m_solver->solve();
+            std::stringstream sstr;
+            sstr << "Progress: " << it << " / " << required_steps << " (" << (it + 1) * 100.0 / required_steps << "%)";
+            std::string prt = sstr.str();
+            while(prt.size() < 30)prt += ' ';
+            std::cout << '\r' << prt;
+            std::cout.flush();
+            
+            //std::cout << "Soem: " << fieldE.sum() << "\n";
             //std::cout << ippl::Info->getOutputLevel() << "\n";
             size_t count = 50;
             if(custom_options.contains("output") && custom_options["output"].contains("count")){
@@ -584,7 +666,7 @@ struct fdtd_initer {
                     break;
                     case chash<"E">():
                     case chash<"electric">():
-                    dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2]);
+                    dumpVTK(fieldE, nr[0], nr[1], nr[2], it, hr[0], hr[1], hr[2], 6.543e61);
                     break;
                     case chash<"rad">():
                     case chash<"radiation">():
@@ -685,6 +767,13 @@ auto jdefault(const nlohmann::json& v, const std::string& k, auto dv){
 }
 
 int main(int argc, char* argv[]){
+    //ippl::Vector<double, 3> E{1.5,2.5,3.5};
+    //ippl::Vector<double, 3> B{1,2,3};
+    //Kokkos::pair<ippl::Vector<double, 3>, ippl::Vector<double, 3>> peer{E, B};
+    //LorentzFrame<double> kakframe(ippl::Vector<double, 3>{6.0,10.0,-500.0});// = LorentzFrame<double>::uniaxialGamma<'z'>(100.41);
+    //LOG(kakframe.inverse_transform_EB(kakframe.transform_EB(peer)).first);
+    //LOG(kakframe.inverse_transform_EB(kakframe.transform_EB(peer)).second);
+    //return 0;
     ippl::initialize(argc, argv);
     {
         //LorentzFrame<double>  frame(ippl::Vector<double, 3>{0.5,0.7,0.9});
@@ -703,14 +792,77 @@ int main(int argc, char* argv[]){
 
         //options<("mesh-lengths"_option)> option_getter;
         //std::cout << decltype(option_getter)::datatype::get<0>().value << "\n";
-        std::ifstream cfile("config.json");
+        
+
+        std::ifstream cfile("config_reference.json");
         nlohmann::json j;
         cfile >> j;
         constexpr unsigned Dim = 3;
         ippl::Vector<int, Dim> res = getVector<int, Dim>(j["mesh"]["resolution"]);
+        double length_factor = 1.0;
+        double time_factor = 1.0;
+        if(j["mesh"].contains("length-scale")){
+            std::string length_scale_string = lowercase_singular((std::string)j["mesh"]["length-scale"]);
+            switch (chash(length_scale_string)) {
+                case chash<"planck-length">():
+                case chash<"plancklength">():
+                case chash<"pl">():
+                case chash<"natural">():
+                    length_factor = 1.0;
+                break;
+                case chash<"picometer">():
+                    length_factor = 1e-12 * meter_in_unit_lengths;
+                break;
+                case chash<"nanometer">():
+                    length_factor = 1e-9 * meter_in_unit_lengths;
+                break;
+                case chash<"micrometer">():
+                    length_factor = 1e-6 * meter_in_unit_lengths;
+                break;
+                case chash<"millimeter">():
+                    length_factor = 1e-3 * meter_in_unit_lengths;
+                break;
+                case chash<"meter">():
+                    length_factor = meter_in_unit_lengths;
+                break;
+                default:
+                    std::cerr << "Unrecognized length scale: " << (std::string)j["mesh"]["length-scale"] << "\n";
+                break;
+            }
+        }
+        if(j["mesh"].contains("time-scale")){
+            std::string length_scale_string = lowercase_singular((std::string)j["mesh"]["time-scale"]);
+            switch (chash(length_scale_string)) {
+                case chash<"planck-time">():
+                case chash<"plancktime">():
+                    time_factor = 1.0;
+                break;
+                case chash<"picosecond">():
+                    time_factor = 1e-12 * second_in_unit_times;
+                break;
+                case chash<"nanosecond">():
+                    time_factor = 1e-9 * second_in_unit_times;
+                break;
+                case chash<"microsecond">():
+                    time_factor = 1e-6 * second_in_unit_times;
+                break;
+                case chash<"millisecond">():
+                    time_factor = 1e-3 * second_in_unit_times;
+                break;
+                case chash<"second">():
+                    time_factor = second_in_unit_times;
+                break;
+                default:
+                    std::cerr << "Unrecognized time scale: " << (std::string)j["mesh"]["time-scale"] << "\n";
+                break;
+            }
+        }
         ippl::Vector<double, Dim> ext = ippl::Vector<double, 3>{j["mesh"]["extents"][0], j["mesh"]["extents"][1], j["mesh"]["extents"][2]};
+        ext *= length_factor;
         size_t pc = j["bunch"]["number-of-particles"];
         double time = j["mesh"]["total-time"];
+        time *= time_factor;
+        std::cout << "Simulating for " << time << "\n";
         double z_gamma = j["bunch"]["gamma"];
         std::cerr << "Res: " << res << "\n";
         std::cerr << "Ext: " << ext << "\n";
@@ -723,7 +875,7 @@ int main(int argc, char* argv[]){
             goto end;
         }
         
-        ippl::undulator_parameters<double> params((double)j["undulator"]["static-undulator"]["undulator-parameter"], (double)j["undulator"]["static-undulator"]["period"]);
+        ippl::undulator_parameters<double> params((double)j["undulator"]["static-undulator"]["undulator-parameter"], ((double)j["undulator"]["static-undulator"]["period"]) * length_factor, ((double)j["undulator"]["static-undulator"]["length"]) * length_factor);
         fdtd_initer<Dim> fdtd(z_gamma, params, res, ext, pc, time, j);
         fdtd.doRequiredSteps();
     }

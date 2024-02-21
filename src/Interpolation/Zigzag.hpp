@@ -58,6 +58,8 @@ namespace ippl {
             Vector<T, Dim> from, Vector<T, Dim> to, const Vector<T, Dim> hr, T scale,
             const NDIndex<Dim> lDom, int nghost) {
             // Use utility functions
+            //std::cout << scale << "\n";
+            //scale = 1.0;
 
             using Kokkos::floor;
             using Kokkos::max;
@@ -76,6 +78,8 @@ namespace ippl {
                 toi[i]                      = floor(to_in_grid_coordinates[i]) + nghost;
 
                 if(absdiff(fromi[i], toi[i]) > 3)return;
+                if(fromi[i] >= view.extent(i))return;
+                if(toi[i] >= view.extent(i))return;
             }
 
             ippl::Vector<IndexType, Dim> fromi_local = fromi - lDom.first();
@@ -96,6 +100,7 @@ namespace ippl {
 
             jcto = to;
             jcto -= relay;
+            //std::cout << "Zigzag::jc: " << fromi_local << toi_local << "\n";
 
             // Calculate wlo and whi
             Vector<T, Dim> wlo, whi;

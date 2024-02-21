@@ -27,9 +27,22 @@
 
 #include "FieldLayout/FieldLayout.h"
 #include "Meshes/UniformCartesian.h"
+#include "Utility/unit.hpp"
 
-constexpr double electron_charge = 1.0;
-constexpr double electron_mass = 1.0;
+//constexpr double electron_charge = 1.0;
+//constexpr double electron_mass = 1.0;
+constexpr double unit_length_in_meters = 1.616255e-35;
+constexpr double unit_charge_in_electron_charges = 11.71;
+//constexpr double unit_charge_in_electron_charges = 3.303;
+constexpr double unit_mass_in_kg = 2.176434e-8;
+constexpr double kg_in_unit_masses = 1.0 / unit_mass_in_kg;
+constexpr double unit_time_in_seconds = 5.391247e-44;
+constexpr double meter_in_unit_lengths = 1.0 / unit_length_in_meters;
+constexpr double electron_charge_in_unit_charges = 1.0 / unit_charge_in_electron_charges;
+constexpr double second_in_unit_times = 1.0 / unit_time_in_seconds;
+
+constexpr double electron_mass_in_kg = 9.1093837015e-31;
+constexpr double electron_mass_in_unit_masses = electron_mass_in_kg * kg_in_unit_masses;
 template <typename T>
 T squaredNorm(const ippl::Vector<T, 3>& a) {
     return a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
@@ -258,6 +271,8 @@ struct LorentzFrame{
         ret += vscale(beta_m, dot_prod(unprimedV, beta_m) * (gamma_m / (gamma_m + 1)));
         return vscale(ret, factor);
     }
+
+
     KOKKOS_INLINE_FUNCTION Vector3 transformGammabeta(const Vector3& gammabeta)const noexcept{
         using Kokkos::sqrt;
         T gamma = sqrt(T(1) + dot_prod(gammabeta, gammabeta));
@@ -272,18 +287,14 @@ struct LorentzFrame{
         using Kokkos::sqrt;
         Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> ret;
         Vector3 vnorm = vscale(beta_m, (1.0 / sqrt(dot_prod(beta_m, beta_m))));
-        ret.first  = (unprimedEB.first  + vscale(cross_prod(beta_m, unprimedEB.second), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.first,  vnorm))));
-        ret.second = (unprimedEB.second - vscale(cross_prod(beta_m, unprimedEB.first ), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.second, vnorm))));
+        //std::cout << "FDTDSolver::289:" << dot_prod(vnorm, vnorm) << "\n";
+        ret.first  = vscale(ippl::Vector<T, 3>(unprimedEB.first  + cross_prod(beta_m, unprimedEB.second)), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.first,  vnorm)));
+        ret.second = vscale(ippl::Vector<T, 3>(unprimedEB.second - cross_prod(beta_m, unprimedEB.first )), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.second, vnorm)));
         return ret;
     }
-    KOKKOS_INLINE_FUNCTION Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> inverse_transform_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& unprimedEB)const noexcept{
-        using Kokkos::sqrt;
+    KOKKOS_INLINE_FUNCTION Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> inverse_transform_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& primedEB)const noexcept{
         ippl::Vector<T, 3> mgb(gammaBeta_m * -1.0);
-        Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> ret;
-        Vector3 vnorm = vscale(beta_m, (1.0 / sqrt(dot_prod(beta_m, beta_m))));
-        ret.first  = (unprimedEB.first  + vscale(cross_prod(beta_m, unprimedEB.second), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.first,  vnorm))));
-        ret.second = (unprimedEB.second - vscale(cross_prod(beta_m, unprimedEB.first ), gamma_m) - vscale(vnorm, (gamma_m - 1) * (dot_prod(unprimedEB.second, vnorm))));
-        return ret;
+        return LorentzFrame<T>(mgb).transform_EB(primedEB);
     }
     //Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>> transform_inverse_EB(const Kokkos::pair<ippl::Vector<T, 3>, ippl::Vector<T, 3>>& primedEB)const noexcept{
     //    using Kokkos::sqrt;
@@ -377,10 +388,11 @@ namespace ippl {
     template<typename scalar>
     struct undulator_parameters{
         scalar lambda; //MITHRA: lambda_u
-        scalar B_magnitude;
         scalar K; //Undulator parameter
-        undulator_parameters(scalar K_undulator_parameter, scalar lambda_u) : lambda(lambda_u), K(K_undulator_parameter){
-            B_magnitude = (2 * M_PI * electron_mass * K) / (electron_charge * lambda_u);
+        scalar length;
+        scalar B_magnitude;
+        undulator_parameters(scalar K_undulator_parameter, scalar lambda_u, scalar _length) : lambda(lambda_u), K(K_undulator_parameter), length(_length){
+            B_magnitude = (2 * M_PI * electron_mass_in_unit_masses * K) / (electron_charge_in_unit_charges * lambda_u);
         }
     };
 
