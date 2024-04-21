@@ -28,9 +28,11 @@ target_link_libraries (
 add_executable (TestFDTDSolver TestFDTDSolver.cpp)
 target_link_libraries (
     TestFDTDSolver
+    eglutils
     ${IPPL_LIBS}
     ${MPI_CXX_LIBRARIES}
 )
+target_include_directories(TestFDTDSolver PUBLIC "${eglutils_SOURCE_DIR}")
 
 if (ENABLE_FFT)
     add_executable (TestGaussian_convergence TestGaussian_convergence.cpp)

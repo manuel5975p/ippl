@@ -44,11 +44,6 @@ file(
     https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
     "${CMAKE_BINARY_DIR}/downloaded_headers/json.hpp"
 )
-file(
-    DOWNLOAD
-    https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h
-    "${CMAKE_BINARY_DIR}/downloaded_headers/stb_image_write.hpp"
-)
 include_directories("${CMAKE_BINARY_DIR}/downloaded_headers/")
 option (USE_STATIC_LIBRARIES "Link with static libraries if available" ON)
 
