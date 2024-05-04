@@ -9,8 +9,11 @@ link_directories (
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${Kokkos_DIR}/..
 )
-
+if(NOT ENABLE_RENDERING)
 set (IPPL_LIBS ippl)
+else()
+set (IPPL_LIBS ippl eglutils)
+endif()
 
 add_executable (TestSolverDesign TestSolverDesign.cpp)
 target_link_libraries (
