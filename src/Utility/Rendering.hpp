@@ -489,22 +489,24 @@ namespace ippl{
     template<typename field_type>
     KOKKOS_INLINE_FUNCTION aabb<float, 3> getLocalDomainBox(field_type f){
         auto fview = f.getView();
-        ippl::Vector<field_type, 3> O = f.get_mesh().getOrigin();
-        ippl::Vector<field_type, 3> hr = f.get_mesh().getMeshSpacing();
+        auto c_c = f.get_mesh().getOrigin();
+        using scalar_type = typename decltype(c_c)::value_type;
+        ippl::Vector<scalar_type, 3> O = f.get_mesh().getOrigin();
+        ippl::Vector<scalar_type, 3> hr = f.get_mesh().getMeshSpacing();
         NDIndex<3> lDom = f.getLayout().getLocalNDIndex();
         NDIndex<3> gDom = f.getLayout().getDomain();
-        ippl::Vector<field_type, 3> domain_begin = O;
-        ippl::Vector<field_type, 3> global_domain_begin = O;
-        ippl::Vector<field_type, 3> domain_end = O;
-        ippl::Vector<field_type, 3> global_domain_end = O;
+        ippl::Vector<scalar_type, 3> domain_begin = O;
+        ippl::Vector<scalar_type, 3> global_domain_begin = O;
+        ippl::Vector<scalar_type, 3> domain_end = O;
+        ippl::Vector<scalar_type, 3> global_domain_end = O;
         domain_begin += hr * lDom.first();
         domain_end   += hr * lDom.last();
         domain_end   += hr;
 
         global_domain_begin += hr * gDom.first();
         global_domain_end   += hr * gDom.last();
-        aabb<float, 3> domain_box(domain_begin, domain_end);
-        aabb<float, 3> global_domain_box(global_domain_begin, global_domain_end);
+        aabb<scalar_type, 3> domain_box(domain_begin, domain_end);
+        aabb<scalar_type, 3> global_domain_box(global_domain_begin, global_domain_end);
         return domain_box;
     }
     template<typename field_type>
@@ -526,8 +528,8 @@ namespace ippl{
 
         global_domain_begin += hr * gDom.first();
         global_domain_end   += hr * gDom.last();
-        aabb<float, 3> domain_box(domain_begin, domain_end);
-        aabb<float, 3> global_domain_box(global_domain_begin, global_domain_end);
+        aabb<scalar_type, 3> domain_box(domain_begin, domain_end);
+        aabb<scalar_type, 3> global_domain_box(global_domain_begin, global_domain_end);
         return global_domain_box;
     }
     
@@ -568,7 +570,6 @@ namespace ippl{
             }
             int j = int(pos_remap[0]);
             int i = int(pos_remap[1]);
-            std::cout << i << ", " << j << "\n";
             float corrected_radius = particle_radius;
             using Kokkos::ceil;
             using Kokkos::min;
@@ -698,11 +699,11 @@ namespace ippl{
                 //ret.set(i, j, Vector<float, 4>{0.2,0.4,0.5,1.0});
                 return;
             }
-            if constexpr(std::is_same_v<ippl::Vector<float, 3>, std::remove_all_extents_t<std::invoke_result_t<color_map, field_valuetype>>>){
+            if(std::is_same_v<ippl::Vector<float, 3>, std::remove_all_extents_t<std::invoke_result_t<color_map, field_valuetype>>>){
                 auto col = alpha_extend(cmap(value), 1.0f);
                 ret.set(i, j, col);
             }
-            else if constexpr(std::is_same_v<ippl::Vector<float, 4>, std::remove_all_extents_t<std::invoke_result_t<color_map, field_valuetype>>>){
+            else if(std::is_same_v<ippl::Vector<float, 4>, std::remove_all_extents_t<std::invoke_result_t<color_map, field_valuetype>>>){
                 auto col = cmap(value);
                 ret.set(i, j, col);
             }
@@ -742,33 +743,30 @@ namespace ippl{
 
         global_domain_begin += hr * gDom.first();
         global_domain_end   += hr * gDom.last();
-        aabb<float, 3> domain_box(domain_begin, domain_end);
-        aabb<float, 3> global_domain_box(global_domain_begin, global_domain_end);
+        aabb<T, 3> domain_box(domain_begin, domain_end);
+        aabb<T, 3> global_domain_box(global_domain_begin, global_domain_end);
         const float distance_normalization = global_domain_box.max_extent();
-        //f.getLayout().getDomain().first()[0];
-        //NDRegion<T, 1> lKlonk = f.getLayout().getDomain();
-        //std::cout << lKlonk[0] << "\n";
+        
         const float fovy = 1.0f;
         const float tanHalfFovy = std::tan(fovy / 2.0f);
         const float aspect = float(width) / float(height);
         const float xmul = tanHalfFovy * aspect;
         const float ymul = tanHalfFovy;
         rm::Vector<T, 3> pos = cam.pos.template cast<T>();
-        auto look = cam.look_dir();
+        auto look = cam.look_dir().template cast<T>();
         std::cout << "Luegin in direction" << look << "\n";
-        auto left = cam.left().normalized();
-        //std::cout << "Left" << left << "\n";
+        auto left = cam.left().normalized().template cast<T>();
 
-        rm::Vector<float, 3> up{0,1,0};
+        rm::Vector<T, 3> up{0,1,0};
         up = left.cross(look).normalized();
-        //auto left = cam.;
+        
         bool check_for_already_existing_depth_buffer = already_drawn.width > 0;
         auto preexisting_depthbuffer = already_drawn.depth_buffer;
         Kokkos::parallel_for(ret.getRangePolicy(), KOKKOS_LAMBDA(uint32_t y, uint32_t x){
             int xi = int(x) - int(width / 2);
             int yi = int(y) - int(height / 2);
-            rm::Vector<float, 3> tp = (look + (left * 2.0f * float(xi) * (1.0f / float(width)) * xmul) + up * (2.0f * ymul * float(yi) * (1.0f / float(height)))).template cast<T>().normalized();
-            ray<float, 3> lray(pos, tp.normalized());
+            rm::Vector<T, 3> tp = (look + (left * 2.0f * float(xi) * (1.0f / float(width)) * xmul) + up * (2.0f * ymul * float(yi) * (1.0f / float(height)))).template cast<T>().normalized();
+            ray<T, 3> lray(pos, tp.normalized());
             auto [first_t, second_t] = intersection_ts(lray, domain_box);
             if(Kokkos::isnan(first_t)){// || (check_for_already_existing_depth_buffer && (first_t > preexisting_depthbuffer(y * width + x)))){
                 if(check_for_already_existing_depth_buffer){
@@ -780,9 +778,8 @@ namespace ippl{
                 return;
             }
             
-            //const float transparency = 1.0f - alfa;
             const float luminance = 0.1f;
-            //constexpr float normalization_factor = 0.1f;
+            
             int stepc = 1000;
             float stepmul = 0.01f * distance_normalization;
             ippl::Vector<float, 4> float_color{0,0,0,0};
