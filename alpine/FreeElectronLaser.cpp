@@ -1484,9 +1484,14 @@ int main(int argc, char* argv[]) {
             //int rank = ippl::Comm->rank();
             //int size = ippl::Comm->size();
             if((cfg.output_rhythm != 0) && (i % cfg.output_rhythm == 0)){
-                ippl::Image img = ippl::drawFieldCrossSection(fdtd_state.fieldsAndParticles.B, 1500, 400, ippl::axis::y, scalar(0.0), []KOKKOS_FUNCTION(const ippl::Vector<scalar, 3> E){
+                int width = 1920;
+                int height = 700;
+                rm::Vector<float, 3> pos{float(cfg.extents[1] * 0.75), 0.0f, (float)cfg.extents[2] * 0.4f};
+                rm::Vector<float, 3> look{0.0f,0.0f,(float)cfg.extents[2] * 0.25f};
+                ippl::Image parts =  ippl::drawParticles(fdtd_state.fieldsAndParticles.particles.R, width, height, rm::camera(pos, look - pos), cfg.extents[1] / 200.0f, ippl::Vector<float, 4>{0,1,0,1,0.3f});
+                ippl::Image img = ippl::drawFieldFog(fdtd_state.fieldsAndParticles.B, width, height, rm::camera(pos, look - pos), []KOKKOS_FUNCTION(const ippl::Vector<scalar, 3> E){
                     return ippl::normalized_colormap(turbo_cm, Kokkos::sqrt(E.dot(E)) * 0.002f);
-                }, true);
+                }, parts);
                 img.save_to(ffmpeg_file);
             }    
         }
