@@ -2063,6 +2063,8 @@ int main(int argc, char* argv[]) {
 
         };
         BunchInitialize<scalar> mithra_config = generate_mithra_config(cfg, frame_boost);
+        cfg.resolution[2] *= ippl::Comm->size();
+        cfg.total_time /= ippl::Comm->size();
         ippl::NDIndex<3> owned(cfg.resolution[0], cfg.resolution[1], cfg.resolution[2]);
 
         std::array<bool, 3> isParallel;
