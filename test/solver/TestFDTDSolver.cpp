@@ -2244,7 +2244,8 @@ int main(int argc, char* argv[]) {
             }    
         }
         uint64_t endtime = nanoTime();
-        std::cout << ippl::Comm->size() << " " << double(endtime - starttime) / 1e9 << std::endl;
+        if(ippl::Comm->rank() == 0)
+            std::cout << ippl::Comm->size() << " " << double(endtime - starttime) / 1e9 << std::endl;
     }
     ippl::finalize();
 }
