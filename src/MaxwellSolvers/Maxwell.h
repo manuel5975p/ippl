@@ -45,8 +45,7 @@ namespace ippl {
 
         /*!
          * Set the problem RHS (charge & current densities)
-         * @param charge Reference to rho field
-         * @param current Reference to J field
+         * @param four_current The four current field (rho, J)
          */
         virtual void setSource(FourField& charge) {
             source_mp = &charge;
@@ -54,8 +53,8 @@ namespace ippl {
 
         /*!
          * Set the problem LHS (electromagnetic fields)
-         * @param E Reference to electric field
-         * @param B Reference to magnetic field
+         * @param E The electric field
+         * @param B The magnetic field
          */
         void setEMFields(EMField& E, EMField& B) {
             En_mp = &E;
