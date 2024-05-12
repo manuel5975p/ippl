@@ -524,7 +524,7 @@ namespace ippl{
          * 
          * @param backgroundColor Background fill color 
          */
-        KOKKOS_INLINE_FUNCTION void removeAlpha(ippl::Vector<float, 3> backgroundColor){
+        void removeAlpha(ippl::Vector<float, 3> backgroundColor){
             auto cbuf = this->color_buffer;
             auto w = this->width;
             Kokkos::parallel_for(getRangePolicy(), KOKKOS_LAMBDA(uint32_t i, uint32_t j){
@@ -663,7 +663,7 @@ namespace ippl{
                         float pdist = float(_i - i) * float(_i - i) + float(_j - j) * float(_j - j);
                         if(pdist < corrected_radius * corrected_radius){
                             float inten = Kokkos::exp(-pdist * pdist / (corrected_radius * corrected_radius));
-                            ippl::Vector<float, 3> particle_color = cmap(cAttribViews(idx)...);
+                            ippl::Vector<float, 3> particle_color = cmap(/*cAttribViews(idx)...*/);
                             cbuffer(_i * width + _j)[0] = particle_color[0];
                             cbuffer(_i * width + _j)[1] = particle_color[1];
                             cbuffer(_i * width + _j)[2] = particle_color[2];
@@ -968,7 +968,7 @@ namespace ippl{
                     if(_i >= 0 && _i < height && _j >= 0 && _j < width){
                         float pdistsq = (float(_i - i) * float(_i - i) + float(_j - j) * float(_j - j));
                         if(pdistsq < corrected_radius * corrected_radius * 4){
-                            Vector<float, 4> fc = alpha_extend(cmap(cattribViews(particle_idx)...), Kokkos::exp(-pdistsq / (corrected_radius * corrected_radius)));
+                            Vector<float, 4> fc = alpha_extend(cmap(/*cattribViews(particle_idx)...*/), Kokkos::exp(-pdistsq / (corrected_radius * corrected_radius)));
                             
                             ret_cb(_i * width + _j) = porterDuff(fc, ret_cb(_i * width + _j));
 
