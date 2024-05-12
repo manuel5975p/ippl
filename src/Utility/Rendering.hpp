@@ -7,6 +7,7 @@
 #define RM_INLINE KOKKOS_INLINE_FUNCTION
 #include <rastmath.hpp>
 #include <flaschentype.hpp>
+#include "Colormaps.hpp"
 #include <Field/Field.h>
 template<typename T, unsigned N>
 KOKKOS_INLINE_FUNCTION ippl::Vector<T, N> rm_to_ippl(const rm::Vector<T, N>& rmvec){
@@ -994,7 +995,7 @@ namespace ippl{
      * @param y Distance in pixels from the top image border
      * @param f flaschentype Font
      */
-    inline void drawTextOnto(Image& img, std::string text, int x, int y, const Font& f, const ippl::Vector<float, 4>& fillColor = ippl::Vector<float, 1>{1,1,1,1}){
+    inline void drawTextOnto(Image& img, std::string text, int x, int y, const Font& f, const ippl::Vector<float, 4>& fillColor = ippl::Vector<float, 4>{1,1,1,1}){
         text_image timg = draw_text(text, f);
         Kokkos::View<Image::color_type*> colorb("text", timg.w * timg.h);
         typename Kokkos::View<Image::color_type*>::host_mirror_type colobhm = Kokkos::create_mirror_view(colorb);
