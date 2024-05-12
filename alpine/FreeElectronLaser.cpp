@@ -1349,6 +1349,7 @@ int main(int argc, char* argv[]) {
         //test_amperes_law<scalar>(64);
         //goto exit;
         config cfg = read_config("../config.json");
+        Font font(100);
         const scalar frame_gamma = std::max(decltype(cfg)::scalar(1), cfg.bunch_gamma / std::sqrt(1.0 + cfg.undulator_K * cfg.undulator_K * config::scalar(0.5)));
         cfg.extents[2] *= frame_gamma;
         cfg.total_time /= frame_gamma;
@@ -1488,10 +1489,11 @@ int main(int argc, char* argv[]) {
                 int height = 700;
                 rm::Vector<float, 3> pos{float(cfg.extents[1] * 0.75), 0.0f, (float)cfg.extents[2] * 0.4f};
                 rm::Vector<float, 3> look{0.0f,0.0f,(float)cfg.extents[2] * 0.25f};
-                ippl::Image parts =  ippl::drawParticles(fdtd_state.fieldsAndParticles.particles.R, width, height, rm::camera(pos, look - pos), cfg.extents[1] / 200.0f, ippl::Vector<float, 4>{0,1,0,1,0.3f});
+                ippl::Image parts =  ippl::drawParticles(fdtd_state.fieldsAndParticles.particles.R, width, height, rm::camera(pos, look - pos), cfg.extents[1] / 500.0f, KOKKOS_LAMBDA(){return ippl::Vector<float, 4>{0,1,0,1,0.3f};});
                 ippl::Image img = ippl::drawFieldFog(fdtd_state.fieldsAndParticles.B, width, height, rm::camera(pos, look - pos), []KOKKOS_FUNCTION(const ippl::Vector<scalar, 3> E){
                     return ippl::normalized_colormap(turbo_cm, Kokkos::sqrt(E.dot(E)) * 0.002f);
                 }, parts);
+                ippl::drawTextOnto(img, std::string("Radiation: ") + std::to_string(radiation_in_watt_global), 50, 50, font);
                 img.save_to(ffmpeg_file);
             }    
         }
