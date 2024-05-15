@@ -359,10 +359,10 @@ namespace ippl{
             Kokkos::View<color_type*> cbview = color_buffer;
             Kokkos::View<output_color*> oview("output_view", color_buffer.extent(0));
             Kokkos::parallel_for(width * height, KOKKOS_LAMBDA(size_t i){
-                oview(i)[0] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[0], 0.0f, 1.0f) * 256.0f)));
-                oview(i)[1] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[1], 0.0f, 1.0f) * 256.0f)));
-                oview(i)[2] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[2], 0.0f, 1.0f) * 256.0f)));
-                oview(i)[3] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[3], 0.0f, 1.0f) * 256.0f)));
+                oview(i)[0] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[0], 0.0f, 1.0f) * 255.0f)));
+                oview(i)[1] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[1], 0.0f, 1.0f) * 255.0f)));
+                oview(i)[2] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[2], 0.0f, 1.0f) * 255.0f)));
+                oview(i)[3] = uint8_t(Kokkos::min(255u, uint32_t(clamp(cbview(i)[3], 0.0f, 1.0f) * 255.0f)));
             });
             Kokkos::fence();
             Kokkos::View<output_color*>::host_mirror_type hmirror = Kokkos::create_mirror_view(oview);
@@ -529,9 +529,12 @@ namespace ippl{
             auto w = this->width;
             Kokkos::parallel_for(getRangePolicy(), KOKKOS_LAMBDA(uint32_t i, uint32_t j){
                 auto c = cbuf(i * w + j);
-                c[0] = c[0] * c[3] + backgroundColor[0] * (1.0f - c[3]);
-                c[1] = c[1] * c[3] + backgroundColor[1] * (1.0f - c[3]);
-                c[2] = c[2] * c[3] + backgroundColor[2] * (1.0f - c[3]);
+                float alpha = c[3];
+                //if(alpha != 0)
+                //    printf("%f, ", alpha);
+                c[0] = c[0] * alpha + backgroundColor[0] * (1.0f - alpha);
+                c[1] = c[1] * alpha + backgroundColor[1] * (1.0f - alpha);
+                c[2] = c[2] * alpha + backgroundColor[2] * (1.0f - alpha);
                 c[3] = 1.0f;
                 cbuf(i * w + j) = c;
             });
@@ -874,9 +877,9 @@ namespace ippl{
                     if(inside){
                         auto col = cmap(value);
 
-                        float alfa = 0;
+                        float alfa = 0.9f;
                         if constexpr(std::is_same_v<ippl::Vector<float, 3>, std::remove_all_extents_t<std::invoke_result_t<color_map, field_valuetype>>>){
-                            alfa = 0.8f;
+                            alfa = 0.9f;
                         }
                         else if constexpr(std::is_same_v<ippl::Vector<float, 4>, std::remove_all_extents_t<std::invoke_result_t<color_map, field_valuetype>>>){
                             alfa = col[3];
@@ -889,6 +892,8 @@ namespace ippl{
                         float_color[1] = float_color[1] * transparency_remaining + col[1] * luminance_gained;
                         float_color[2] = float_color[2] * transparency_remaining + col[2] * luminance_gained;
                         float_color[3] = 1.0f - (1.0f - float_color[3]) * transparency_remaining;
+                        //printf("alpha: %f,", transparency);
+                        
                     }
                     if(check_for_already_existing_depth_buffer){
                         if(already_drawn.depth_buffer(y * width + x) > (step * stepmul) && already_drawn.depth_buffer(y * width + x) < ((step+1) * stepmul)){
@@ -900,6 +905,8 @@ namespace ippl{
                     }
                 }
             }
+            //if(float_color[3] != 0.0f)
+            //printf("alpha: %f, ", float_color[3]);
             ret.set(y, x, float_color, first_t);
         });
         Kokkos::fence();
@@ -968,7 +975,7 @@ namespace ippl{
                     if(_i >= 0 && _i < height && _j >= 0 && _j < width){
                         float pdistsq = (float(_i - i) * float(_i - i) + float(_j - j) * float(_j - j));
                         if(pdistsq < corrected_radius * corrected_radius * 4){
-                            Vector<float, 4> fc = alpha_extend(cmap(/*cattribViews(particle_idx)...*/), Kokkos::exp(-pdistsq / (corrected_radius * corrected_radius)));
+                            Vector<float, 4> fc = alpha_extend(cmap(/*cattribViews(particle_idx)...*/), Kokkos::exp(-2.0f * pdistsq / (corrected_radius * corrected_radius)));
                             
                             ret_cb(_i * width + _j) = porterDuff(fc, ret_cb(_i * width + _j));
 
@@ -1011,12 +1018,17 @@ namespace ippl{
         end[0] = timg.h;
         end[1] = timg.w;
         uint32_t wif = timg.w;
+        uint32_t iwif = img.width;
+        auto imgcb = img.color_buffer;
         //uint32_t heit = timg.h;
         RangePolicy<2, typename Image::color_buffer_type::execution_space>::policy_type pol(begin, end);
         Kokkos::parallel_for(pol, KOKKOS_LAMBDA(uint32_t i, uint32_t j){
             
             if(img.isInRange(i + y, j + x)){
-                img.set(i + y, j + x, porterDuff(colorb(i * wif + j), img.get(i + y, j + x)));
+                imgcb(i * iwif + j) = porterDuff(colorb(i * wif + j), imgcb(i * iwif + j));
+                //imgcb(i * iwif + j)[0] += colorb(i * wif + j)[0] * colorb(i * wif + j)[3];
+                //imgcb(i * iwif + j)[1] += colorb(i * wif + j)[1] * colorb(i * wif + j)[3];
+                //imgcb(i * iwif + j)[2] += colorb(i * wif + j)[2] * colorb(i * wif + j)[3];
             }
         });
         Kokkos::fence();

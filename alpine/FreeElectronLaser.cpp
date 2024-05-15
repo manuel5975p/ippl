@@ -1340,6 +1340,14 @@ scalar test_amperes_law(uint32_t n){
     }
     return 0.0f;
 }
+template<typename T, typename R, typename S>
+KOKKOS_INLINE_FUNCTION rm::Vector<float, 3> mv3(T t, R r, S s){
+    return rm::Vector<float, 3>{
+        (float)t,
+        (float)r,
+        (float)s
+    };  
+}
 int main(int argc, char* argv[]) {
     using scalar = float;
     ippl::initialize(argc, argv);
@@ -1349,7 +1357,7 @@ int main(int argc, char* argv[]) {
         //test_amperes_law<scalar>(64);
         //goto exit;
         config cfg = read_config("../config.json");
-        Font font(100);
+        Font font(60);
         const scalar frame_gamma = std::max(decltype(cfg)::scalar(1), cfg.bunch_gamma / std::sqrt(1.0 + cfg.undulator_K * cfg.undulator_K * config::scalar(0.5)));
         cfg.extents[2] *= frame_gamma;
         cfg.total_time /= frame_gamma;
@@ -1406,7 +1414,7 @@ int main(int argc, char* argv[]) {
         }
 
         ippl::FELSimulationState<scalar> fdtd_state(layout, mesh, 0 /*no resize function exists wtf cfg.num_particles*/, cfg);
-        
+        typename ippl::FELSimulationState<scalar>::ThreeField radiation_field(mesh, layout);
         if(ippl::Comm->rank() == 0){
             std::cout << "Init particles: " << std::endl;
             size_t actual_pc = initialize_bunch_mithra(fdtd_state.fieldsAndParticles.particles, mithra_config, frame_gamma);
@@ -1433,18 +1441,25 @@ int main(int argc, char* argv[]) {
         size_t timesteps_required = std::ceil(cfg.total_time / fdtd_state.dt());
         uint64_t starttime =  nanoTime();
         std::ofstream rad;
-        FILE* ffmpeg_file = nullptr;
+        constexpr uint32_t cameras = 4;
+        FILE* ffmpeg_file[cameras] = {};
         if(ippl::Comm->rank() == 0){
             rad = std::ofstream("radiation.txt");
-            const char* ffmpegCmd = "ffmpeg -y -f image2pipe -vcodec bmp -r 30 -i - -vf scale=force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p -c:v libx264 -tune zerolatency -movflags +faststart ffmpeg_popen.mkv";
+            const std::string cmdOnly = "ffmpeg -y -f image2pipe -vcodec bmp -r 30 -i - -vf scale=force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p -c:v libx264 -tune zerolatency -movflags +faststart ";
+            
+            std::string cmds[cameras];
             if(cfg.output_rhythm != 0){
-                ffmpeg_file = popen(ffmpegCmd, "w");
+                for(uint32_t i = 0;i < cameras;i++){
+                    cmds[i] = cmdOnly + "ffmpeg_output" + std::to_string(i) + ".mkv";
+                    ffmpeg_file[i] = popen(cmds[i].c_str(), "w");
+                }
             }
         }
 
 
         for(size_t i = 0;i < timesteps_required;i++){
-
+            const float progress = float(i) / float(timesteps_required - 1);
+            (void)progress;
             //fdtd_state.J = scalar(0.0);
             //fdtd_state.playout.update(fdtd_state.particles);
             //fdtd_state.scatterBunch();
@@ -1458,18 +1473,26 @@ int main(int argc, char* argv[]) {
             auto bview = fdtd_state.fieldsAndParticles.B.getView();
             //auto ebv = fdtd_state.EB.getView();
             double radiation = 0.0;
-            Kokkos::parallel_reduce(ippl::getRangePolicy(eview, 1), KOKKOS_LAMBDA(uint32_t i, uint32_t j, uint32_t k, double& ref){
+            Kokkos::parallel_reduce(ippl::getRangePolicy(eview, 3), KOKKOS_LAMBDA(uint32_t i, uint32_t j, uint32_t k, double& ref){
                 //uint32_t ig = i + ldom.first()[0];
                 //uint32_t jg = j + ldom.first()[1];
                 Kokkos::pair<ippl::Vector<scalar, 3>, ippl::Vector<scalar, 3>> buncheb{eview(i,j,k), bview(i,j,k)};
                 ippl::Vector<scalar, 3> Elab = frame_boost.inverse_transform_EB(buncheb).first;
                 ippl::Vector<scalar, 3> Blab = frame_boost.inverse_transform_EB(buncheb).second;
                 uint32_t kg = k + ldom.first()[2];
-                if(kg == nrg[2] - 3){
+                if(kg == nrg[2] - 4){
                     ref += Elab.cross(Blab)[2];
                 }
 
             }, radiation);
+            radiation_field = ippl::Vector<scalar, 3>(0.0);
+            auto radiation_view = radiation_field.getView();
+            Kokkos::parallel_for(ippl::getRangePolicy(eview, 2), KOKKOS_LAMBDA(uint32_t i, uint32_t j, uint32_t k){
+                Kokkos::pair<ippl::Vector<scalar, 3>, ippl::Vector<scalar, 3>> buncheb{eview(i,j,k), bview(i,j,k)};
+                ippl::Vector<scalar, 3> Elab = frame_boost.inverse_transform_EB(buncheb).first;
+                ippl::Vector<scalar, 3> Blab = frame_boost.inverse_transform_EB(buncheb).second;
+                radiation_view(i, j, k) = Elab.cross(Blab);
+            });
             double radiation_in_watt_on_this_rank = radiation *
             double(unit_powerdensity_in_watt_per_square_meter * unit_length_in_meters * unit_length_in_meters) *
             fdtd_state.hr_m[0] * fdtd_state.hr_m[1];
@@ -1484,18 +1507,30 @@ int main(int argc, char* argv[]) {
             //std::cout << "J: " << fdtd_state.J.getVolumeIntegral() << "\n";
             //int rank = ippl::Comm->rank();
             //int size = ippl::Comm->size();
-            if((cfg.output_rhythm != 0) && (i % cfg.output_rhythm == 0)){
+            if((cfg.output_rhythm != 0) && (i % cfg.output_rhythm == 0) && i > 2000 && i < 5000){
                 int width = 1920;
                 int height = 700;
-                rm::Vector<float, 3> pos{float(cfg.extents[1] * 0.75), 0.0f, (float)cfg.extents[2] * 0.4f};
-                rm::Vector<float, 3> look{0.0f,0.0f,(float)cfg.extents[2] * 0.25f};
-                ippl::Image parts =  ippl::drawParticles(fdtd_state.fieldsAndParticles.particles.R, width, height, rm::camera(pos, look - pos), cfg.extents[1] / 500.0f, KOKKOS_LAMBDA(){return ippl::Vector<float, 4>{0,1,0,1,0.3f};});
-                ippl::Image img = ippl::drawFieldFog(fdtd_state.fieldsAndParticles.B, width, height, rm::camera(pos, look - pos), []KOKKOS_FUNCTION(const ippl::Vector<scalar, 3> E){
-                    return ippl::normalized_colormap(turbo_cm, Kokkos::sqrt(E.dot(E)) * 0.002f);
-                }, parts);
-                ippl::drawTextOnto(img, std::string("Radiation: ") + std::to_string(radiation_in_watt_global), 50, 50, font);
-                img.save_to(ffmpeg_file);
-            }    
+                scalar pf = progress * 2 * 2 * M_PI;
+                std::array<std::pair<rm::Vector<float, 3>,rm::Vector<float, 3>>, cameras> position_looktarget_pairs = {
+                    std::pair<rm::Vector<float, 3>,rm::Vector<float, 3>>{rm::Vector<float, 3>{float(cfg.extents[1] * 1.25), 0.0f, (float)cfg.extents[2] * 0.2f}, rm::Vector<float, 3>{0.0f,0.0f,(float)cfg.extents[2] * 0.2f}},
+                    std::pair<rm::Vector<float, 3>,rm::Vector<float, 3>>{mv3(cfg.extents[1] * 0.01, cfg.extents[1] * 1.25, cfg.extents[2] * 0.2f), rm::Vector<float, 3>{0.0f,0.0f,(float)cfg.extents[2] * 0.2f}},
+                    std::pair<rm::Vector<float, 3>,rm::Vector<float, 3>>{mv3(cfg.extents[1] * 0.75 * (1.0 - progress), 0.0f, cfg.extents[2] * 0.45f), mv3(0, 0.0f, cfg.extents[2] * 0.2f)},
+                    std::pair<rm::Vector<float, 3>,rm::Vector<float, 3>>{mv3(std::sin(pf) * cfg.extents[1] * 1.25, 0, 0.45 * cfg.extents[2]), mv3(0, 0, 0.25 * cfg.extents[2])}
+                };
+                for(uint32_t c = 0;c < cameras;c++){
+                    rm::Vector<float, 3> pos = position_looktarget_pairs[c].first;
+                    rm::Vector<float, 3> look = position_looktarget_pairs[c].second;
+                    ippl::Image parts =  ippl::drawParticles(fdtd_state.fieldsAndParticles.particles.R, width, height, rm::camera(pos, look - pos), cfg.extents[1] / 500.0f, KOKKOS_LAMBDA(){return ippl::Vector<float, 4>{0,1,0,1,1.0f};});
+                    ippl::Image img = ippl::drawFieldFog(radiation_field, width, height, rm::camera(pos, look - pos), []KOKKOS_FUNCTION(const ippl::Vector<scalar, 3> S){
+                        scalar val = Kokkos::sqrt(S.dot(S)) * 1e-9;
+                        scalar mult = Kokkos::max(scalar(1), val);
+                        return ippl::normalized_colormap(inferno_cm, val) * mult;
+                    }, parts);
+                    ippl::drawTextOnto(img, std::string("Radiation: ") + std::to_string(radiation_in_watt_global), 20, 20, font);
+                    img.removeAlpha(ippl::Vector<float, 3>{0,0,0});
+                    img.save_to(ffmpeg_file[c]);
+                }
+            }
         }
         uint64_t endtime = nanoTime();
         if(ippl::Comm->rank() == 0)

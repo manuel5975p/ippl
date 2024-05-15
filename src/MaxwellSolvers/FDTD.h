@@ -683,8 +683,8 @@ namespace ippl {
                 Kokkos::fence();
                 Kokkos::parallel_for(particles.getLocalNum(), KOKKOS_LAMBDA(size_t i){
                     const ippl::Vector<scalar, 3> pgammabeta = gbview(i);
-                    ippl::Vector<scalar, 3> E_grid = eview(i);
-                    ippl::Vector<scalar, 3> B_grid = bview(i);
+                    ippl::Vector<scalar, 3> E_grid = eview(i) * scalar(0.3);
+                    ippl::Vector<scalar, 3> B_grid = bview(i) * scalar(0.3);
                     //std::cout << "E_grid: " << E_grid << "\n";
                     //std::cout << "B_grid: " << B_grid << "\n";
                     ippl::Vector<scalar, 3> bunchpos = rview(i);
